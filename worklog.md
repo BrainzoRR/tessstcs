@@ -291,3 +291,20 @@ Stage Summary:
 - Zip пересоздан чисто: deploy-export/cs2-vercel-deploy.zip (без app/route.ts).
 - Build проходит локально — Vercel тоже соберёт.
 - Пользователю: скачать НОВЫЙ zip, ПОЛНОСТЬЮ заменить файлы на GitHub (удалить старый app/route.ts если есть), redeploy.
+
+---
+Task ID: force-sync-local-to-db
+Agent: Z.ai Code (main)
+Task: Пользователь: debug показывает totalMatches:0 (удалил из Neon), но в браузере 3 матча остаются. Матчи не синхронизируются из localStorage в БД.
+
+Work Log:
+- Нашёл причину: при hydration с пустой БД, MERGE_HISTORY оставляет localOnly матчи в state, но debounce sync срабатывает только при ИЗМЕНЕНИИ state.matchHistory. После MERGE с теми же localOnly матчами reference может не измениться достаточно для React → sync не срабатывает → localOnly матчи никогда не отправляются в БД.
+- ФИКС: добавил force-sync в hydration effect — после MERGE вычисляю localOnly (матчи в state которых нет в БД) и немедленно POST /api/sync с mergeOnly:true. Не жду debounce.
+- Добавил подробное логирование: клиентский console.log [db] sync/force-sync, серверный console.log [api/sync] received/upserted/skipping/failed.
+- Тест локально: создал матч → БД=1, localStorage=1 → очистил БД (имитация удаления в Neon) → reload → console показал "[db] force-syncing 1 local-only match(es) to DB" → "force-sync ok, upserted: 1" → DB снова totalMatches:1. Force-sync работает!
+- Пересоздал архивы (zip 638KB + tar.gz 612KB) с force-sync фиксом + логированием.
+
+Stage Summary:
+- Проблема "матчи в браузере остаются но в БД не идут" решена: force-sync после hydration немедленно отправляет localOnly матчи в БД.
+- Логирование поможет диагностировать: открой DevTools Console (F12) — увидишь [db] sync/force-sync сообщения. На Vercel открой Functions logs — увидишь [api/sync] received/upserted.
+- Архивы обновлены: deploy-export/cs2-vercel-deploy.zip (638KB).

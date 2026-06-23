@@ -1407,24 +1407,31 @@ function App() {
         // Merge DB entries with whatever is already in local state.
         dispatch({ type: "MERGE_HISTORY", payload: dbEntries });
         dbHydratedRef.current = true;
-        // Force-push any local-only matches to the server right now.
+        // Force-push any local-only matches to the server right now, ONE BY ONE.
+        // (Batching would hit Vercel's 4.5MB body limit — see sync effect below.)
         if (localOnly.length > 0) {
           console.log(`[db] force-syncing ${localOnly.length} local-only match(es) to DB`);
-          try {
-            const syncRes = await fetch("/api/sync", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ entries: localOnly, mergeOnly: true }),
-            });
-            if (!syncRes.ok) {
-              console.error("[db] force-sync failed", await syncRes.text());
-            } else {
-              const syncData = await syncRes.json();
-              console.log("[db] force-sync ok, upserted:", syncData.synced);
+          let fok = 0;
+          let ffail = 0;
+          for (const entry of localOnly) {
+            if (!entry?.id) continue;
+            try {
+              const r = await fetch("/api/matches", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ entry }),
+              });
+              if (r.ok) fok += 1;
+              else {
+                ffail += 1;
+                console.error(`[db] force-sync upsert failed for ${entry.id}: HTTP ${r.status}`);
+              }
+            } catch (e) {
+              ffail += 1;
+              console.error(`[db] force-sync error for ${entry.id}:`, e);
             }
-          } catch (e) {
-            console.error("[db] force-sync error", e);
           }
+          console.log(`[db] force-sync done — ok: ${fok}, failed: ${ffail}`);
         }
       } catch (err) {
         console.error("DB hydration failed", err);
@@ -1438,32 +1445,41 @@ function App() {
   }, []);
 
   // ---- Database sync: debounce-push matchHistory changes to the server ----
-  // IMPORTANT: we only ever UPSERT matches here (add/update). We must never
-  // let an empty local matchHistory wipe the DB — localStorage quota issues
-  // can temporarily make state.matchHistory empty right after load, and the
-  // reconcile endpoint would otherwise delete every saved match. So we pass
-  // a special "merge-only" flag that tells the server to skip deletion.
+  // IMPORTANT: We upsert matches ONE BY ONE to /api/matches instead of batching
+  // all of them in a single /api/sync call. Each match's full data payload
+  // (maps + rounds + players) is 100-500KB, and Vercel serverless functions
+  // reject request bodies larger than 4.5MB with HTTP 413. Sending 3-10
+  // matches at once blows past that limit, so sync would silently fail and
+  // matches would never reach the DB. Individual POSTs stay well under the cap.
   useEffect(() => {
     if (!dbHydratedRef.current) return;
     window.clearTimeout(dbSyncTimerRef.current);
     dbSyncTimerRef.current = window.setTimeout(async () => {
       const entries = state.matchHistory ?? [];
-      console.log(`[db] sync: sending ${entries.length} match(es) to DB (mergeOnly)`);
-      try {
-        const syncRes = await fetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entries, mergeOnly: true }),
-        });
-        if (!syncRes.ok) {
-          console.error("[db] sync HTTP error", syncRes.status, await syncRes.text());
-        } else {
-          const syncData = await syncRes.json();
-          console.log(`[db] sync ok — upserted ${syncData.synced}, DB total now ${(syncData.entries ?? []).length}`);
+      if (entries.length === 0) return;
+      console.log(`[db] sync: upserting ${entries.length} match(es) one-by-one`);
+      let ok = 0;
+      let fail = 0;
+      for (const entry of entries) {
+        if (!entry?.id) continue;
+        try {
+          const res = await fetch("/api/matches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entry }),
+          });
+          if (res.ok) {
+            ok += 1;
+          } else {
+            fail += 1;
+            console.error(`[db] upsert failed for ${entry.id}: HTTP ${res.status}`);
+          }
+        } catch (err) {
+          fail += 1;
+          console.error(`[db] upsert error for ${entry.id}:`, err);
         }
-      } catch (err) {
-        console.error("[db] sync failed", err);
       }
+      console.log(`[db] sync done — ok: ${ok}, failed: ${fail}`);
     }, 900);
     return () => window.clearTimeout(dbSyncTimerRef.current);
   }, [state.matchHistory]);
