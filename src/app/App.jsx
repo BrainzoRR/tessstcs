@@ -1,0 +1,7658 @@
+"use client";
+import { Component, createContext, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  BarChart3,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  Crosshair,
+  Download,
+  FileUp,
+  Filter,
+  Flame,
+  History,
+  House,
+  Play,
+  Plus,
+  Save,
+  Search,
+  Shield,
+  Sparkles,
+  Sword,
+  Target,
+  Trash2,
+  Trophy,
+  Upload,
+  Users,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  STORAGE_KEY,
+  MAP_POOL,
+  REGIONS,
+  ROLES,
+  MATCH_FORMATS,
+  SPEED_OPTIONS,
+  MAP_CONFIGS,
+  EVENT_TYPES,
+  TOURNAMENT_STAGES,
+  clamp,
+  compositeRating,
+  createBlankCoach,
+  createBlankPlayer,
+  createBlankTeam,
+  createInitialAppData,
+  deepClone,
+  deriveBannedMaps,
+  formatMoney,
+  getCompositeColor,
+  getMapPriority,
+  getRatingColor,
+  getTeamStrength,
+  normalizeTeam,
+  createMatchFromSetup,
+  startMatch,
+  stepMatch,
+  simulateEntireMatch,
+  buildHistoryEntry,
+  buildResultsData,
+} from "@/lib/simulation";
+import {
+  aggregateMapStats,
+  aggregatePlayerStats,
+  aggregateTeamStats,
+  aggregateTournamentStats,
+  buildArchiveOptions,
+  buildArchiveOverview,
+  createArchiveFilters,
+  filterArchiveEntries,
+  normalizeHistoryEntry,
+  normalizeResultsDataShape,
+  sanitizeMatchHistoryEntries,
+} from "@/lib/archiveStats";
+
+const NAV_ITEMS = [
+  { id: "home", label: "Home", icon: House },
+  { id: "teams", label: "Teams", icon: Users },
+  { id: "match-setup", label: "Match Setup", icon: Sword },
+  { id: "live", label: "Live Match", icon: Crosshair },
+  { id: "results", label: "Results", icon: Trophy },
+  { id: "history", label: "History", icon: History },
+  { id: "stats", label: "Stats", icon: BarChart3 },
+];
+
+const LanguageContext = createContext(null);
+
+const COPY = {
+  en: {
+    nav_home: "Home",
+    nav_teams: "Teams",
+    nav_match_setup: "Match Setup",
+    nav_live: "Live Match",
+    nav_results: "Results",
+    nav_history: "History",
+    nav_stats: "Stats",
+    app_title: "CS2 Pro Match Simulator",
+    app_tagline: "Dark server room. Full series control.",
+    language: "Language",
+    last_saved: "Last saved",
+    not_saved: "Not saved yet",
+    export_all_data: "Export All Data",
+    import_data: "Import Data",
+    dashboard: "Dashboard",
+    quick_start: "Quick Start",
+    top_teams: "Top Teams",
+    recent_results: "Recent Results",
+    open_team_manager: "Open Team Manager",
+    open_history: "Open History",
+    team_manager: "Team Manager",
+    new_team: "New Team",
+    save_team: "Save Team",
+    delete_team: "Delete",
+    match_setup: "Match Setup",
+    start_veto: "Start Veto",
+    series_rules: "Series Rules",
+    checklist: "Checklist",
+    veto_screen: "Veto Screen",
+    series_order: "Series Order",
+    round_history: "Round History",
+    live_match: "Live Match",
+    round_hud: "Round HUD",
+    live_feed: "Live Feed",
+    economy_graph: "Economy Graph",
+    series_results: "Series Results",
+    highlights: "Highlights",
+    map_breakdown: "Map Breakdown",
+    full_player_stats: "Full Player Stats",
+    history: "History",
+    clear_history: "Clear History",
+    filter_by_team: "Filter by team",
+    combined: "Combined",
+    by_team: "By Team",
+    player: "Player",
+    team: "Team",
+    rating: "Rating",
+    open_team_manager_short: "Open Team Manager",
+  },
+  ru: {
+    nav_home: "Главная",
+    nav_teams: "Команды",
+    nav_match_setup: "Настройка матча",
+    nav_live: "Live матч",
+    nav_results: "Результаты",
+    nav_history: "История",
+    app_title: "CS2 Pro Match Simulator",
+    app_tagline: "Темная серверная. Полный контроль серии.",
+    language: "Язык",
+    last_saved: "Последнее сохранение",
+    not_saved: "Еще не сохранено",
+    export_all_data: "Экспортировать все данные",
+    import_data: "Импортировать данные",
+    dashboard: "Дашборд",
+    quick_start: "Быстрый старт",
+    top_teams: "Топ команд",
+    recent_results: "Последние результаты",
+    open_team_manager: "Открыть менеджер команд",
+    open_history: "Открыть историю",
+    team_manager: "Менеджер команд",
+    new_team: "Новая команда",
+    save_team: "Сохранить команду",
+    delete_team: "Удалить",
+    match_setup: "Настройка матча",
+    start_veto: "Начать veto",
+    series_rules: "Правила серии",
+    checklist: "Чеклист",
+    veto_screen: "Экран veto",
+    series_order: "Порядок карт",
+    round_history: "История раундов",
+    live_match: "Live матч",
+    round_hud: "HUD раунда",
+    live_feed: "Live лента",
+    economy_graph: "График экономики",
+    series_results: "Итоги серии",
+    highlights: "Хайлайты",
+    map_breakdown: "Разбор карт",
+    full_player_stats: "Полная статистика игроков",
+    history: "История",
+    clear_history: "Очистить историю",
+    filter_by_team: "Фильтр по команде",
+    combined: "Все вместе",
+    by_team: "По командам",
+    player: "Игрок",
+    team: "Команда",
+    rating: "Рейтинг",
+    open_team_manager_short: "Менеджер команд",
+  },
+};
+
+const COPY_RU = {
+  nav_home: "Главная",
+  nav_teams: "Команды",
+  nav_match_setup: "Матч",
+  nav_live: "Live Match",
+  nav_results: "Результаты",
+  nav_history: "История",
+  app_title: "CS2 Pro Match Simulator",
+  app_tagline: "Темная серверная. Полный контроль серии.",
+  language: "Язык",
+  last_saved: "Последнее сохранение",
+  not_saved: "Еще не сохранено",
+  export_all_data: "Экспортировать все данные",
+  import_data: "Импортировать данные",
+  dashboard: "Дашборд",
+  quick_start: "Быстрый старт",
+  top_teams: "Топ команд",
+  recent_results: "Последние результаты",
+  open_team_manager: "Открыть менеджер команд",
+  open_history: "Открыть историю",
+  team_manager: "Менеджер команд",
+  new_team: "Новая команда",
+  save_team: "Сохранить команду",
+  delete_team: "Удалить",
+  match_setup: "Настройка матча",
+  start_veto: "Начать veto",
+  series_rules: "Правила серии",
+  checklist: "Чеклист",
+  veto_screen: "Экран veto",
+  series_order: "Порядок карт",
+  round_history: "История раундов",
+  live_match: "Live Match",
+  round_hud: "HUD раунда",
+  live_feed: "Live лента",
+  economy_graph: "График экономики",
+  series_results: "Итоги серии",
+  highlights: "Хайлайты",
+  map_breakdown: "Разбор карт",
+  full_player_stats: "Полная статистика игроков",
+  history: "История",
+  clear_history: "Очистить историю",
+  filter_by_team: "Фильтр по команде",
+  combined: "Все вместе",
+  by_team: "По командам",
+  player: "Игрок",
+  team: "Команда",
+  rating: "Рейтинг",
+  open_team_manager_short: "Менеджер команд",
+};
+
+const RADAR_ASSETS = {
+  Mirage: { upper: "/radars/mirage.webp" },
+  Inferno: { upper: "/radars/inferno.webp" },
+  Nuke: { upper: "/radars/nuke-upper.webp", lower: "/radars/nuke-lower.webp" },
+  Overpass: { upper: "/radars/overpass.webp" },
+  Dust: { upper: "/radars/dust2.webp" },
+  Ancient: { upper: "/radars/ancient.webp" },
+  Anubis: { upper: "/radars/anubis.webp" },
+};
+
+const RADAR_VIEWBOXES = {
+  Mirage: {
+    upper: { left: 0.08, top: 0.07, width: 0.84, height: 0.85 },
+  },
+  Inferno: {
+    upper: { left: 0.04, top: 0.03, width: 0.9, height: 0.92 },
+  },
+  Nuke: {
+    upper: { left: 0.18, top: 0.16, width: 0.7, height: 0.62 },
+    lower: { left: 0.38, top: 0.34, width: 0.34, height: 0.42 },
+  },
+  Overpass: {
+    upper: { left: 0.09, top: 0.03, width: 0.79, height: 0.93 },
+  },
+  Dust: {
+    upper: { left: 0.02, top: 0.03, width: 0.95, height: 0.91 },
+  },
+  Ancient: {
+    upper: { left: 0.14, top: 0.09, width: 0.73, height: 0.79 },
+  },
+  Anubis: {
+    upper: { left: 0.16, top: 0.05, width: 0.74, height: 0.91 },
+  },
+};
+
+function radarRegion(x, y, width, height, level = "upper", space = "view") {
+  return { x, y, width, height, level, space };
+}
+
+function radarPoint(x, y, level = "upper", space = "view") {
+  return radarRegion(x, y, 0.024, 0.024, level, space);
+}
+
+function radarAnchors(points, level = "upper", space = "view", radius = 0.022) {
+  return {
+    anchors: points,
+    radius,
+    level,
+    space,
+  };
+}
+
+function radarPolygon(points, level = "upper", space = "absolute") {
+  return {
+    polygon: points,
+    level,
+    space,
+  };
+}
+
+const RADAR_SITE_FALLBACKS = {
+  Mirage: {
+    A: radarAnchors([[0.72, 0.49], [0.77, 0.43], [0.66, 0.58]]),
+    B: radarAnchors([[0.18, 0.57], [0.24, 0.61], [0.26, 0.52]]),
+    Mid: radarAnchors([[0.49, 0.68], [0.5, 0.52], [0.39, 0.54]]),
+  },
+  Inferno: {
+    A: radarAnchors([[0.72, 0.75], [0.82, 0.78], [0.61, 0.72]]),
+    B: radarAnchors([[0.2, 0.17], [0.23, 0.23], [0.22, 0.39]]),
+    Mid: radarAnchors([[0.47, 0.58], [0.61, 0.56], [0.52, 0.72]]),
+  },
+  Nuke: {
+    A: radarAnchors([[0.56, 0.46], [0.62, 0.39], [0.64, 0.57]]),
+    B: radarAnchors([[0.55, 0.46], [0.49, 0.56], [0.69, 0.59]], "lower"),
+    Mid: radarAnchors([[0.18, 0.55], [0.79, 0.58], [0.32, 0.54]]),
+  },
+  Overpass: {
+    A: radarAnchors([[0.77, 0.23], [0.82, 0.31], [0.65, 0.22]]),
+    B: radarAnchors([[0.24, 0.59], [0.18, 0.74], [0.37, 0.67]]),
+    Mid: radarAnchors([[0.54, 0.26], [0.46, 0.46], [0.66, 0.13]]),
+  },
+  Dust: {
+    A: radarAnchors([[0.8, 0.17], [0.69, 0.27], [0.12, 0.58]]),
+    B: radarAnchors([[0.12, 0.14], [0.22, 0.14], [0.34, 0.31]]),
+    Mid: radarAnchors([[0.5, 0.29], [0.52, 0.39], [0.39, 0.47]]),
+  },
+  Ancient: {
+    A: radarAnchors([[0.72, 0.38], [0.39, 0.47], [0.24, 0.7]]),
+    B: radarAnchors([[0.17, 0.22], [0.24, 0.33], [0.13, 0.31]]),
+    Mid: radarAnchors([[0.46, 0.53], [0.47, 0.61], [0.39, 0.47]]),
+  },
+  Anubis: {
+    A: radarAnchors([[0.24, 0.8], [0.22, 0.56], [0.36, 0.39]]),
+    B: radarAnchors([[0.84, 0.19], [0.81, 0.19], [0.73, 0.3]]),
+    Mid: radarAnchors([[0.46, 0.74], [0.51, 0.53], [0.57, 0.64]]),
+  },
+};
+
+const RADAR_ZONE_POSITIONS = {
+  Mirage: {
+    "A ramp": radarAnchors([[0.6, 0.79], [0.63, 0.76]]),
+    palace: radarAnchors([[0.63, 0.16], [0.6, 0.18]]),
+    ticket: radarAnchors([[0.79, 0.43], [0.82, 0.41]]),
+    jungle: radarAnchors([[0.67, 0.53], [0.7, 0.56]]),
+    apartments: radarAnchors([[0.23, 0.14], [0.26, 0.17], [0.28, 0.2]]),
+    bench: radarAnchors([[0.19, 0.6], [0.22, 0.61]]),
+    market: radarAnchors([[0.29, 0.52], [0.31, 0.55]]),
+    van: radarAnchors([[0.14, 0.56], [0.16, 0.59]]),
+    "top mid": radarAnchors([[0.48, 0.69], [0.52, 0.67]]),
+    window: radarAnchors([[0.49, 0.52], [0.51, 0.5]]),
+    connector: radarAnchors([[0.6, 0.62], [0.62, 0.65]]),
+    catwalk: radarAnchors([[0.35, 0.53], [0.39, 0.53]]),
+  },
+  Inferno: {
+    short: radarAnchors([[0.59, 0.73], [0.62, 0.7]]),
+    library: radarAnchors([[0.77, 0.66], [0.79, 0.63]]),
+    pit: radarAnchors([[0.84, 0.79], [0.81, 0.75]]),
+    "site::A": radarAnchors([[0.72, 0.76], [0.75, 0.73]]),
+    banana: radarAnchors([[0.21, 0.46], [0.23, 0.38], [0.24, 0.3]]),
+    coffins: radarAnchors([[0.15, 0.12], [0.18, 0.11]]),
+    "new box": radarAnchors([[0.22, 0.13], [0.24, 0.16]]),
+    dark: radarAnchors([[0.14, 0.21], [0.16, 0.24]]),
+    mid: radarAnchors([[0.47, 0.59], [0.5, 0.56]]),
+    arch: radarAnchors([[0.61, 0.56], [0.64, 0.54]]),
+    boiler: radarAnchors([[0.51, 0.71], [0.54, 0.73]]),
+    lane: radarAnchors([[0.43, 0.73], [0.46, 0.74]]),
+  },
+  Nuke: {
+    outside: radarAnchors([[0.17, 0.53], [0.22, 0.57], [0.28, 0.6]]),
+    mini: radarAnchors([[0.56, 0.5], [0.54, 0.46]]),
+    hut: radarAnchors([[0.64, 0.57], [0.63, 0.52]]),
+    heaven: radarAnchors([[0.61, 0.37], [0.58, 0.34]]),
+    ramp: radarAnchors([[0.42, 0.57], [0.44, 0.61]], "lower", "absolute"),
+    fork: radarAnchors([[0.47, 0.47], [0.49, 0.49]], "lower", "absolute"),
+    decon: radarAnchors([[0.61, 0.5], [0.63, 0.54]], "lower", "absolute"),
+    "double doors": radarAnchors([[0.47, 0.47], [0.49, 0.49]], "lower", "absolute"),
+    "site::B": radarAnchors([[0.53, 0.57], [0.55, 0.61]], "lower", "absolute"),
+    garage: radarAnchors([[0.08, 0.55], [0.1, 0.58]]),
+    secret: radarAnchors([[0.66, 0.6], [0.68, 0.67]], "lower", "absolute"),
+    lobby: radarAnchors([[0.79, 0.58], [0.75, 0.56], [0.83, 0.6]]),
+  },
+  Overpass: {
+    long: radarAnchors([[0.74, 0.22], [0.77, 0.25]]),
+    bathrooms: radarAnchors([[0.63, 0.23], [0.66, 0.22]]),
+    truck: radarAnchors([[0.82, 0.31], [0.79, 0.33]]),
+    "site::A": radarAnchors([[0.79, 0.24], [0.81, 0.28]]),
+    monster: radarAnchors([[0.17, 0.74], [0.2, 0.69]]),
+    "short::B": radarAnchors([[0.37, 0.67], [0.35, 0.63]]),
+    pillar: radarAnchors([[0.27, 0.64], [0.24, 0.61]]),
+    "site::B": radarAnchors([[0.24, 0.59], [0.28, 0.6]]),
+    connector: radarAnchors([[0.46, 0.46], [0.43, 0.49]]),
+    fountain: radarAnchors([[0.54, 0.26], [0.51, 0.26]]),
+    party: radarAnchors([[0.66, 0.13], [0.69, 0.12]]),
+    "short::Mid": radarAnchors([[0.4, 0.54], [0.37, 0.56]]),
+  },
+  Dust: {
+    long: radarAnchors([[0.12, 0.58], [0.16, 0.62], [0.19, 0.64]]),
+    catwalk: radarAnchors([[0.68, 0.26], [0.64, 0.29]]),
+    "A site": radarAnchors([[0.8, 0.17], [0.76, 0.17]]),
+    "short::A": radarAnchors([[0.69, 0.27], [0.65, 0.3]]),
+    tunnels: radarAnchors([[0.21, 0.12], [0.24, 0.14], [0.27, 0.16]]),
+    window: radarAnchors([[0.2, 0.2], [0.18, 0.18]]),
+    "B site": radarAnchors([[0.11, 0.14], [0.13, 0.17], [0.15, 0.13]]),
+    door: radarAnchors([[0.33, 0.31], [0.36, 0.29]]),
+    mid: radarAnchors([[0.52, 0.39], [0.48, 0.4]]),
+    xbox: radarAnchors([[0.59, 0.38], [0.57, 0.36]]),
+    "lower tunnels": radarAnchors([[0.39, 0.47], [0.36, 0.45]]),
+    "top mid": radarAnchors([[0.49, 0.29], [0.53, 0.28]]),
+  },
+  Ancient: {
+    "A main": radarAnchors([[0.24, 0.7], [0.26, 0.74]]),
+    donut: radarAnchors([[0.39, 0.47], [0.36, 0.49]]),
+    temple: radarAnchors([[0.72, 0.44], [0.69, 0.42]]),
+    "site::A": radarAnchors([[0.73, 0.38], [0.69, 0.37]]),
+    cave: radarAnchors([[0.17, 0.22], [0.2, 0.24]]),
+    lane: radarAnchors([[0.24, 0.33], [0.27, 0.35]]),
+    "back site": radarAnchors([[0.13, 0.31], [0.15, 0.28]]),
+    ramp: radarAnchors([[0.35, 0.31], [0.38, 0.3]]),
+    mid: radarAnchors([[0.46, 0.53], [0.49, 0.55]]),
+    "red room": radarAnchors([[0.47, 0.61], [0.45, 0.64]]),
+    boost: radarAnchors([[0.41, 0.47], [0.43, 0.5]]),
+  },
+  Anubis: {
+    "A main": radarAnchors([[0.24, 0.8], [0.28, 0.76]]),
+    heaven: radarAnchors([[0.28, 0.24], [0.26, 0.28]]),
+    "bridge::A": radarAnchors([[0.36, 0.39], [0.39, 0.41]]),
+    "site::A": radarAnchors([[0.22, 0.56], [0.24, 0.6]]),
+    canal: radarAnchors([[0.84, 0.19], [0.81, 0.23]]),
+    pillar: radarAnchors([[0.73, 0.3], [0.69, 0.31]]),
+    "site::B": radarAnchors([[0.81, 0.19], [0.77, 0.18]]),
+    "bridge::B": radarAnchors([[0.66, 0.34], [0.63, 0.36]]),
+    mid: radarAnchors([[0.51, 0.53], [0.48, 0.5]]),
+    connector: radarAnchors([[0.55, 0.44], [0.52, 0.43]]),
+    water: radarAnchors([[0.57, 0.64], [0.54, 0.67]]),
+    "top mid": radarAnchors([[0.46, 0.74], [0.43, 0.71]]),
+  },
+};
+
+const RADAR_ZONE_ALIASES = {
+  Mirage: {
+    "a ramp": "A Ramp",
+    palace: "Palace",
+    "a site": "A Site",
+    "b site": "B Site",
+    ticket: "Ticket Booth",
+    "ticket booth": "Ticket Booth",
+    jungle: "Jungle",
+    apartments: "B Apartments",
+    "b apartments": "B Apartments",
+    bench: "Bench",
+    market: "Market",
+    van: "Van",
+    mid: "Mid",
+    "top mid": "Top Mid",
+    window: "Sniper's Nest",
+    connector: "Connector",
+    catwalk: "Catwalk",
+    "site::a": "A Site",
+    "site::b": "B Site",
+    "site::mid": "Mid",
+  },
+  Inferno: {
+    short: "A Short",
+    library: "Library",
+    pit: "Pit",
+    "a site": "A Site",
+    "b site": "B Site",
+    site: "A Site",
+    banana: "Banana",
+    coffins: "Coffins",
+    "new box": "Quad",
+    dark: "Dark",
+    mid: "Mid",
+    arch: "Arch",
+    boiler: "Boiler",
+    lane: "Patio",
+    "site::a": "A Site",
+    "site::b": "B Site",
+    "site::mid": "Mid",
+  },
+  Nuke: {
+    outside: "Outside",
+    garage: "Garage",
+    lobby: "Lobby",
+    mini: "Mini",
+    hut: "Hut",
+    heaven: "Heaven",
+    secret: "Secret",
+    ramp: "Ramp",
+    fork: "Fork",
+    decon: "Decon",
+    "double doors": "Fork",
+    doors: "Doors",
+    "b site": "B Site",
+    "a site": "A Site",
+    "site::a": "A Site",
+    "site::b": "B Site",
+    main: "Main",
+  },
+  Dust: {
+    long: "A Long",
+    catwalk: "Catwalk",
+    "a site": "A Default Plant",
+    "short::a": "A Short",
+    tunnels: "Upper B Tunnels",
+    "upper tunnels": "Upper B Tunnels",
+    "lower tunnels": "Lower B Tunnels",
+    window: "B Window",
+    "b site": "B Default Plant",
+    "b doors": "B Doors",
+    door: "B Doors",
+    doors: "B Doors",
+    mid: "Mid",
+    xbox: "Xbox",
+    "top mid": "Top Mid",
+    "site::a": "A Default Plant",
+    "site::b": "B Default Plant",
+    "site::mid": "Mid",
+  },
+  Overpass: {
+    long: "A Long",
+    bathrooms: "Toilets",
+    "a site": "A Site",
+    "b site": "B Site",
+    truck: "Van",
+    monster: "Monster",
+    "short::b": "B Short",
+    pillar: "Pillar",
+    connector: "Connector",
+    fountain: "Fountain",
+    party: "Party",
+    "short::mid": "A Short",
+    "site::a": "A Site",
+    "site::b": "B Site",
+  },
+  Ancient: {
+    "a main": "A Main",
+    temple: "Temple",
+    ramp: "Ramp",
+    mid: "Mid",
+    boost: "Boost",
+    water: "Water",
+    heaven: "Heaven",
+    doors: "Doors",
+    "site::a": "A Site",
+    "site::b": "B Site",
+  },
+  Anubis: {
+    "top mid": "Top Mid",
+    water: "Water",
+    pillar: "Pillar",
+    "a main": "Main",
+    main: "Main",
+    connector: "A Connector",
+    "a connector": "A Connector",
+    heaven: "Heaven",
+    "bridge::a": "Bridge",
+    "bridge::b": "Bridge",
+    bridge: "Bridge",
+    "site::a": "A Site",
+    "site::b": "B Site",
+  },
+};
+
+const RADAR_ZONE_POLYGONS = {
+  Mirage: {
+    "A Ramp": radarPolygon([[0.675, 0.675], [0.7775, 0.6737], [0.7837, 0.55], [0.7412, 0.55], [0.74, 0.6075], [0.67, 0.6088]]),
+    Palace: radarPolygon([[0.6262, 0.8037], [0.8462, 0.8075], [0.8438, 0.6837], [0.9113, 0.6], [0.81, 0.6025], [0.8075, 0.7137], [0.685, 0.715], [0.6875, 0.7612], [0.6275, 0.7612]]),
+    "Ticket Booth": radarPolygon([[0.46, 0.7937], [0.4838, 0.8325], [0.4675, 0.86], [0.4113, 0.8325]]),
+    Jungle: radarPolygon([[0.3762, 0.6425], [0.49, 0.6525], [0.485, 0.5813], [0.3688, 0.5713]]),
+    "B Apartments": radarPolygon([[0.2225, 0.2062], [0.3987, 0.2087], [0.4012, 0.2675], [0.44, 0.27], [0.4437, 0.17], [0.22, 0.1625]]),
+    Bench: radarPolygon([[0.1037, 0.3212], [0.1638, 0.3237], [0.1737, 0.2213], [0.1013, 0.2238]]),
+    Market: radarPolygon([[0.1688, 0.4725], [0.335, 0.48], [0.33, 0.4275], [0.2813, 0.4288], [0.2725, 0.3887], [0.1663, 0.3875]]),
+    Van: radarPolygon([[0.16, 0.2188], [0.2213, 0.215], [0.2162, 0.165], [0.1663, 0.1725]]),
+    Mid: radarPolygon([[0.4462, 0.385], [0.7388, 0.3812], [0.735, 0.52], [0.5537, 0.5162], [0.5537, 0.49], [0.44, 0.4963]]),
+    "Top Mid": radarPolygon([[0.6412, 0.525], [0.7412, 0.5275], [0.7412, 0.3625], [0.6138, 0.3575]]),
+    "Sniper's Nest": radarPolygon([[0.3713, 0.545], [0.4175, 0.5525], [0.4188, 0.44], [0.385, 0.44]]),
+    Connector: radarPolygon([[0.4688, 0.585], [0.5375, 0.59], [0.5337, 0.4925], [0.4688, 0.4938]]),
+    Catwalk: radarPolygon([[0.45, 0.4375], [0.6713, 0.4375], [0.6737, 0.39], [0.4487, 0.3887]]),
+    "A Site": radarPolygon([[0.475, 0.8363], [0.6125, 0.8125], [0.625, 0.725], [0.4725, 0.74]]),
+    "B Site": radarPolygon([[0.1837, 0.33], [0.2725, 0.3337], [0.2787, 0.24], [0.1837, 0.24]]),
+  },
+  Inferno: {
+    "A Short": radarPolygon([[0.6825, 0.7937], [0.8237, 0.7975], [0.8237, 0.7375], [0.7212, 0.7388], [0.7238, 0.6875], [0.6763, 0.69]]),
+    Library: radarPolygon([[0.9, 0.565], [0.9575, 0.565], [0.96, 0.5062], [0.8988, 0.505]]),
+    Pit: radarPolygon([[0.8175, 0.8037], [0.9, 0.7675], [0.9437, 0.77], [0.9575, 0.8775], [0.8237, 0.88]]),
+    "A Site": radarPolygon([[0.7688, 0.6275], [0.7712, 0.735], [0.8413, 0.7338], [0.8425, 0.6225]]),
+    Banana: radarPolygon([[0.3975, 0.505], [0.3962, 0.4838], [0.4925, 0.3425], [0.5463, 0.3463], [0.5475, 0.3287], [0.6088, 0.3287], [0.625, 0.4125], [0.52, 0.405], [0.475, 0.4875], [0.4788, 0.5337], [0.4575, 0.56], [0.4275, 0.56]]),
+    Coffins: radarPolygon([[0.5062, 0.1725], [0.5413, 0.1775], [0.5387, 0.1325], [0.505, 0.1363]]),
+    Quad: radarPolygon([[0.4138, 0.2675], [0.45, 0.27], [0.4537, 0.235], [0.4138, 0.2338]]),
+    Dark: radarPolygon([[0.4, 0.155], [0.45, 0.1563], [0.45, 0.1225], [0.39, 0.1237]]),
+    Mid: radarPolygon([[0.4213, 0.6863], [0.675, 0.69], [0.6737, 0.6312], [0.4213, 0.6288]]),
+    Arch: radarPolygon([[0.765, 0.5238], [0.7963, 0.525], [0.7987, 0.4525], [0.7625, 0.4512]]),
+    Boiler: radarPolygon([[0.6412, 0.7212], [0.6825, 0.7212], [0.6875, 0.6875], [0.6425, 0.6875]]),
+    Patio: radarPolygon([[0.6787, 0.795], [0.7238, 0.8025], [0.7262, 0.7612], [0.6813, 0.7612]]),
+    "B Site": radarPolygon([[0.4375, 0.2675], [0.5313, 0.2662], [0.5337, 0.1688], [0.4387, 0.1713]]),
+  },
+  Nuke: {
+    Outside: radarPolygon([[0.4612, 0.7075], [0.5925, 0.7512], [0.6963, 0.745], [0.6913, 0.6238], [0.7612, 0.6275], [0.76, 0.5687], [0.71, 0.575], [0.71, 0.52], [0.6262, 0.5188], [0.625, 0.6175], [0.6038, 0.6188], [0.605, 0.6525], [0.55, 0.6525], [0.5513, 0.6175], [0.5238, 0.6188]], "upper", "absolute"),
+    "A Site": radarPolygon([[0.6212, 0.44], [0.6262, 0.6162], [0.5175, 0.6138], [0.5212, 0.445]], "upper", "absolute"),
+    Garage: radarPolygon([[0.6625, 0.7013], [0.6937, 0.6963], [0.6925, 0.73], [0.7775, 0.7338], [0.78, 0.6262], [0.6613, 0.6238]], "upper", "absolute"),
+    Lobby: radarPolygon([[0.4163, 0.57], [0.5212, 0.5687], [0.52, 0.4975], [0.4475, 0.4975], [0.4462, 0.5138], [0.4163, 0.5138]], "upper", "absolute"),
+    Main: radarPolygon([[0.5487, 0.6538], [0.605, 0.6538], [0.6025, 0.6162], [0.5487, 0.6175]], "upper", "absolute"),
+    Mini: radarPolygon([[0.626, 0.545], [0.679, 0.545], [0.679, 0.614], [0.626, 0.614]], "upper", "absolute"),
+    Hut: radarPolygon([[0.5262, 0.5713], [0.5525, 0.5713], [0.55, 0.53], [0.5225, 0.5313]], "upper", "absolute"),
+    Heaven: radarPolygon([[0.62, 0.445], [0.6813, 0.4437], [0.685, 0.485], [0.6212, 0.485]], "upper", "absolute"),
+    Ramp: radarPolygon([[0.39, 0.51], [0.45, 0.5], [0.47, 0.57], [0.45, 0.66], [0.4, 0.66], [0.38, 0.57]], "lower", "absolute"),
+    Fork: radarPolygon([[0.44, 0.44], [0.5, 0.44], [0.51, 0.5], [0.45, 0.52]], "lower", "absolute"),
+    Decon: radarPolygon([[0.59, 0.45], [0.66, 0.45], [0.66, 0.57], [0.59, 0.57]], "lower", "absolute"),
+    Doors: radarPolygon([[0.49, 0.34], [0.57, 0.34], [0.57, 0.4], [0.49, 0.4]], "lower", "absolute"),
+    "B Site": radarPolygon([[0.47, 0.47], [0.59, 0.47], [0.59, 0.66], [0.47, 0.66]], "lower", "absolute"),
+    Secret: radarPolygon([[0.63, 0.52], [0.7, 0.52], [0.7, 0.73], [0.64, 0.73]], "lower", "absolute"),
+  },
+  Dust: {
+    "A Long": radarPolygon([[0.8263, 0.4263], [0.855, 0.4375], [0.8325, 0.4925], [0.91, 0.4925], [0.9163, 0.2838], [0.8225, 0.275]]),
+    Catwalk: radarPolygon([[0.4938, 0.5925], [0.495, 0.3787], [0.5238, 0.3787], [0.5238, 0.595]]),
+    "A Default Plant": radarPolygon([[0.7887, 0.1862], [0.83, 0.1925], [0.8313, 0.1437], [0.7825, 0.1437]]),
+    "A Short": radarPolygon([[0.6687, 0.1625], [0.6675, 0.425], [0.515, 0.4213], [0.515, 0.3725], [0.605, 0.375], [0.6062, 0.1575]]),
+    "Upper B Tunnels": radarPolygon([[0.0675, 0.5025], [0.2938, 0.4938], [0.295, 0.4338], [0.1862, 0.4363], [0.1875, 0.4025], [0.06, 0.4075]]),
+    "Lower B Tunnels": radarPolygon([[0.2813, 0.4325], [0.4325, 0.4375], [0.4363, 0.3725], [0.2762, 0.3775]]),
+    "B Window": radarPolygon([[0.2462, 0.15], [0.2787, 0.15], [0.2762, 0.11], [0.2437, 0.1087]]),
+    "B Default Plant": radarPolygon([[0.2275, 0.1725], [0.2625, 0.1787], [0.2737, 0.1437], [0.2263, 0.1437]]),
+    "B Doors": radarPolygon([[0.2338, 0.265], [0.2712, 0.2662], [0.2712, 0.2087], [0.2325, 0.2062]]),
+    Mid: radarPolygon([[0.435, 0.5887], [0.4925, 0.5887], [0.4938, 0.4225], [0.4375, 0.42]]),
+    Xbox: radarPolygon([[0.4675, 0.425], [0.4975, 0.4275], [0.5012, 0.3862], [0.455, 0.385]]),
+    "Top Mid": radarPolygon([[0.4562, 0.6512], [0.5925, 0.675], [0.6038, 0.6025], [0.4437, 0.6025]]),
+  },
+  Overpass: {
+    "A Site": radarPolygon([[0.4175, 0.22], [0.515, 0.2625], [0.5725, 0.2125], [0.4487, 0.1563]]),
+    "A Long": radarPolygon([[0.1563, 0.6563], [0.1563, 0.3887], [0.26, 0.3312], [0.3212, 0.2125], [0.365, 0.2338], [0.305, 0.3425], [0.3025, 0.405], [0.2437, 0.4113], [0.2425, 0.5225], [0.2712, 0.525], [0.27, 0.7125], [0.305, 0.7813], [0.2362, 0.81]]),
+    Connector: radarPolygon([[0.4775, 0.5938], [0.5625, 0.6], [0.5613, 0.5575], [0.4888, 0.5587]]),
+    Party: radarPolygon([[0.3088, 0.675], [0.3088, 0.5262], [0.3638, 0.5262], [0.3762, 0.6887], [0.3287, 0.7125]]),
+    Fountain: radarPolygon([[0.4225, 0.7312], [0.455, 0.7175], [0.4525, 0.6813], [0.42, 0.6763], [0.3912, 0.7087]]),
+    Monster: radarPolygon([[0.795, 0.4675], [0.7887, 0.3875], [0.8425, 0.3962], [0.8363, 0.4625]]),
+    "B Short": radarPolygon([[0.7037, 0.425], [0.705, 0.385], [0.7525, 0.3862], [0.7512, 0.4612], [0.685, 0.4587]]),
+    Pillar: radarPolygon([[0.715, 0.3038], [0.7525, 0.3075], [0.7562, 0.3412], [0.7113, 0.3387]]),
+    "B Site": radarPolygon([[0.6675, 0.3538], [0.7288, 0.3538], [0.7225, 0.2875], [0.6613, 0.2938]]),
+    Toilets: radarPolygon([[0.3987, 0.4938], [0.425, 0.4163], [0.385, 0.3725], [0.3862, 0.3463], [0.4313, 0.3488], [0.4587, 0.3713], [0.4637, 0.49], [0.4313, 0.525], [0.3912, 0.525]]),
+    Van: radarPolygon([[0.3663, 0.1487], [0.4238, 0.1563], [0.4288, 0.135], [0.375, 0.1275]]),
+    "A Short": radarPolygon([[0.36, 0.3113], [0.3875, 0.265], [0.505, 0.3262], [0.54, 0.5112], [0.4925, 0.5563], [0.4612, 0.495], [0.4637, 0.375], [0.4325, 0.3475], [0.3638, 0.345]]),
+  },
+  Ancient: {
+    "A Main": radarPolygon([[0.125, 0.38], [0.1275, 0.4263], [0.2412, 0.4238], [0.2412, 0.3812]]),
+    Temple: radarPolygon([[0.4425, 0.1412], [0.4313, 0.1412], [0.4263, 0.1338], [0.3412, 0.1363], [0.34, 0.1713], [0.37, 0.175], [0.3688, 0.165], [0.3962, 0.1675], [0.3962, 0.1737], [0.4225, 0.175], [0.4225, 0.1663], [0.4412, 0.165]]),
+    "A Site": radarPolygon([[0.2662, 0.235], [0.2612, 0.2825], [0.3412, 0.2838], [0.3412, 0.235]]),
+    Ramp: radarPolygon([[0.8025, 0.475], [0.8325, 0.4775], [0.8325, 0.4975], [0.8475, 0.5], [0.85, 0.5975], [0.8063, 0.5962]]),
+    Mid: radarPolygon([[0.5238, 0.5513], [0.425, 0.55], [0.44, 0.5288], [0.4412, 0.49], [0.4238, 0.47], [0.4225, 0.4437], [0.5025, 0.4437], [0.505, 0.4838], [0.5225, 0.4825]]),
+    Water: radarPolygon([[0.6725, 0.8413], [0.7212, 0.8387], [0.7212, 0.7462], [0.7275, 0.735], [0.6725, 0.7375]]),
+    Boost: radarPolygon([[0.195, 0.3237], [0.1975, 0.3563], [0.2263, 0.3563], [0.2263, 0.3375], [0.2525, 0.3375], [0.2487, 0.325]]),
+    "B Site": radarPolygon([[0.7025, 0.38], [0.7037, 0.4387], [0.78, 0.435], [0.7837, 0.4275], [0.79, 0.42], [0.7925, 0.4125], [0.7913, 0.4012], [0.7837, 0.3887], [0.77, 0.3837]]),
+    Heaven: radarPolygon([[0.5238, 0.5513], [0.525, 0.595], [0.5337, 0.595], [0.5337, 0.59], [0.5813, 0.5913], [0.5875, 0.5737], [0.5863, 0.5537]]),
+    Doors: radarPolygon([[0.77, 0.5975], [0.8063, 0.5988], [0.8013, 0.6225], [0.7712, 0.6225]]),
+  },
+  Anubis: {
+    "Top Mid": radarPolygon([[0.4248, 0.6465], [0.4238, 0.6836], [0.4463, 0.709], [0.4492, 0.7031], [0.4932, 0.7041], [0.5059, 0.709], [0.5186, 0.7041], [0.5352, 0.708], [0.5439, 0.7148], [0.5859, 0.6758], [0.541, 0.6748], [0.541, 0.665], [0.5293, 0.6641], [0.5293, 0.6328], [0.4336, 0.6318], [0.4336, 0.6445]]),
+    Water: radarPolygon([[0.4365, 0.5625], [0.4385, 0.6152], [0.46, 0.6152], [0.46, 0.6084], [0.4863, 0.6074], [0.5205, 0.6074], [0.5449, 0.6084], [0.5439, 0.6162], [0.5967, 0.6172], [0.5967, 0.6221], [0.6172, 0.6211], [0.6191, 0.5664], [0.5928, 0.5645], [0.5928, 0.5527], [0.5439, 0.5508], [0.5439, 0.5654], [0.5176, 0.5654], [0.4863, 0.5645], [0.4609, 0.5645]]),
+    Pillar: radarPolygon([[0.3623, 0.543], [0.3623, 0.5781], [0.2793, 0.5781], [0.2588, 0.5557], [0.2881, 0.543]]),
+    "B Site": radarPolygon([[0.3154, 0.5264], [0.3633, 0.5273], [0.3623, 0.4824], [0.3389, 0.459], [0.3145, 0.459]]),
+    Bridge: radarPolygon([[0.4951, 0.4893], [0.4932, 0.502], [0.4824, 0.5039], [0.4795, 0.5195], [0.4814, 0.541], [0.4863, 0.541], [0.4814, 0.541], [0.4854, 0.5654], [0.4814, 0.5742], [0.4814, 0.6016], [0.4863, 0.6094], [0.4863, 0.6299], [0.5166, 0.6309], [0.5166, 0.6074], [0.5234, 0.6025], [0.5225, 0.5674], [0.5166, 0.5625], [0.5186, 0.543], [0.5225, 0.502], [0.5225, 0.4893]]),
+    "A Connector": radarPolygon([[0.5967, 0.3701], [0.6045, 0.3691], [0.6104, 0.3623], [0.6504, 0.3604], [0.6523, 0.3672], [0.6592, 0.3662], [0.6592, 0.3896], [0.6533, 0.3848], [0.6514, 0.3926], [0.6172, 0.3955], [0.6016, 0.3936], [0.5967, 0.3975]]),
+    Main: radarPolygon([[0.7617, 0.4688], [0.7783, 0.4707], [0.7793, 0.4756], [0.8213, 0.4746], [0.8633, 0.4316], [0.8633, 0.3721], [0.8564, 0.3711], [0.8555, 0.3516], [0.8203, 0.3506], [0.8213, 0.3711], [0.8145, 0.3711], [0.8145, 0.4004], [0.7881, 0.4023], [0.7881, 0.4102], [0.8018, 0.4102], [0.8018, 0.4492], [0.7803, 0.4492], [0.7627, 0.4502]]),
+    "A Site": radarPolygon([[0.7246, 0.2188], [0.709, 0.2266], [0.71, 0.2334], [0.707, 0.2393], [0.6992, 0.2412], [0.6934, 0.251], [0.6904, 0.2607], [0.6895, 0.2705], [0.6895, 0.2793], [0.6953, 0.291], [0.6914, 0.2949], [0.6875, 0.2988], [0.6875, 0.3047], [0.707, 0.3115], [0.7324, 0.3096], [0.75, 0.3066], [0.7607, 0.3018], [0.7695, 0.2939], [0.7793, 0.2822], [0.7793, 0.2676], [0.7822, 0.2568], [0.7617, 0.2246], [0.7432, 0.2246]]),
+    Heaven: radarPolygon([[0.2432, 0.6533], [0.2793, 0.6533], [0.2803, 0.6787], [0.3311, 0.7285], [0.3037, 0.7471], [0.2422, 0.6865]]),
+  },
+};
+
+function useI18n() {
+  const context = useContext(LanguageContext);
+  if (!context) {
+    throw new Error("LanguageContext is missing");
+  }
+  return context;
+}
+
+function defaultSetup(teams) {
+  return {
+    teamAId: teams[0]?.id ?? "",
+    teamBId: teams[1]?.id ?? teams[0]?.id ?? "",
+    format: "BO3",
+    speed: "live",
+    showDetailedLogs: true,
+    tournamentName: "Custom Event",
+    stage: "Group Stage",
+    eventType: "Online",
+    matchDate: new Date().toISOString().slice(0, 10),
+  };
+}
+
+const SNAPSHOT_VERSION = 3;
+const VALID_SITE_MODES = new Set([null, "desktop", "mobile"]);
+const VALID_LIVE_LAYOUT_MODES = new Set(["broadcast", "overlay", "coach", "phone"]);
+const VALID_PRESENTATION_MODES = new Set(["semi", "live"]);
+
+function sanitizeMatchHistory(entries) {
+  return sanitizeMatchHistoryEntries(entries);
+}
+
+function sanitizeMatchSetup(setup, teams) {
+  const base = defaultSetup(teams);
+  if (!setup || typeof setup !== "object") {
+    return base;
+  }
+
+  const teamAId = teams.some((team) => team.id === setup.teamAId) ? setup.teamAId : base.teamAId;
+  const teamBId =
+    teams.some((team) => team.id === setup.teamBId && team.id !== teamAId)
+      ? setup.teamBId
+      : teams.find((team) => team.id !== teamAId)?.id ?? base.teamBId;
+
+  return {
+    teamAId,
+    teamBId,
+    format: MATCH_FORMATS.includes(setup.format) ? setup.format : base.format,
+    speed: SPEED_OPTIONS.some((option) => option.id === setup.speed) ? setup.speed : base.speed,
+    showDetailedLogs:
+      typeof setup.showDetailedLogs === "boolean" ? setup.showDetailedLogs : base.showDetailedLogs,
+    tournamentName: typeof setup.tournamentName === "string" && setup.tournamentName.trim() ? setup.tournamentName : base.tournamentName,
+    stage: TOURNAMENT_STAGES.includes(setup.stage) ? setup.stage : base.stage,
+    eventType: EVENT_TYPES.includes(setup.eventType) ? setup.eventType : base.eventType,
+    matchDate: typeof setup.matchDate === "string" && setup.matchDate ? setup.matchDate : base.matchDate,
+  };
+}
+
+const LEGACY_SEED_SIGNATURE = ["FAZE::FAZE", "G2::G2", "NAVI::NAVI", "VIRTUS.PRO::VP"];
+
+function shouldRefreshLegacySeeds(teams) {
+  if (teams.length !== LEGACY_SEED_SIGNATURE.length) {
+    return false;
+  }
+
+  const signature = teams
+    .map((team) => `${team.name.toUpperCase()}::${team.tag.toUpperCase()}`)
+    .sort();
+
+  return signature.every((value, index) => value === LEGACY_SEED_SIGNATURE[index]);
+}
+
+function recoverResultsData(currentMatch, resultsData) {
+  if (resultsData) {
+    return normalizeResultsDataShape(resultsData);
+  }
+
+  if (currentMatch?.status === "finished") {
+    return normalizeResultsDataShape(currentMatch.results ?? buildResultsData(currentMatch));
+  }
+
+  return null;
+}
+
+function isRenderableMatch(match) {
+  return Boolean(
+    match &&
+      typeof match === "object" &&
+      Array.isArray(match.maps) &&
+      match.maps.length &&
+      match.teamA &&
+      match.teamB &&
+      typeof match.status === "string"
+  );
+}
+
+function isRenderableResultsData(resultsData) {
+  return Boolean(
+    resultsData &&
+      typeof resultsData === "object" &&
+      Array.isArray(resultsData.maps) &&
+      resultsData.maps.length &&
+      Array.isArray(resultsData.players) &&
+      resultsData.teamA &&
+      resultsData.teamB
+  );
+}
+
+function sanitizeRestoredSession(snapshotState) {
+  const restoredMatch = isRenderableMatch(snapshotState?.currentMatch) ? snapshotState.currentMatch : null;
+  const restoredResultsCandidate = recoverResultsData(restoredMatch, snapshotState?.resultsData ?? null);
+  const restoredResults = isRenderableResultsData(restoredResultsCandidate) ? restoredResultsCandidate : null;
+  const currentMatch = restoredMatch?.status === "finished" ? null : restoredMatch;
+  let activeView = snapshotState?.activeView ?? "home";
+
+  if ((activeView === "live" || activeView === "veto") && !currentMatch) {
+    activeView = restoredResults ? "results" : activeView === "veto" ? "match-setup" : "home";
+  }
+
+  if (activeView === "results" && !restoredResults) {
+    activeView = currentMatch ? (currentMatch.status === "veto" ? "veto" : "live") : "home";
+  }
+
+  if (activeView === "live" && currentMatch?.status === "veto") {
+    activeView = "veto";
+  }
+
+  if (activeView === "veto" && currentMatch?.status === "live") {
+    activeView = "live";
+  }
+
+  return {
+    activeView,
+    currentMatch,
+    resultsData: restoredResults,
+  };
+}
+
+function loadStoredSnapshot() {
+  const fallback = createInitialAppData();
+  const baseState = {
+    teams: fallback.teams,
+    matchHistory: fallback.matchHistory,
+    activeView: "home",
+    selectedTeamId: fallback.teams[0]?.id ?? null,
+    currentMatch: null,
+    resultsData: null,
+  };
+
+  if (typeof window === "undefined") {
+    return {
+      state: baseState,
+      setup: defaultSetup(fallback.teams),
+      lastSavedAt: null,
+      language: "en",
+      siteMode: null,
+      liveLayoutMode: "broadcast",
+      livePresentationMode: "semi",
+      livePlaybackRate: 1.25,
+      soundDesignEnabled: false,
+    };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return {
+        state: baseState,
+        setup: defaultSetup(fallback.teams),
+        lastSavedAt: null,
+        language: "en",
+        siteMode: null,
+        liveLayoutMode: "broadcast",
+        livePresentationMode: "semi",
+        livePlaybackRate: 1.25,
+        soundDesignEnabled: false,
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    const parsedVersion = Number(parsed.snapshotVersion ?? 0);
+    const storedTeams = (Array.isArray(parsed.state?.teams) ? parsed.state.teams : parsed.teams ?? fallback.teams).map(normalizeTeam);
+    const teams = shouldRefreshLegacySeeds(storedTeams) ? fallback.teams : storedTeams;
+    const matchHistory = sanitizeMatchHistory(parsed.state?.matchHistory ?? parsed.matchHistory ?? []);
+    const restoredSession =
+      parsedVersion >= SNAPSHOT_VERSION ? sanitizeRestoredSession(parsed.state ?? {}) : sanitizeRestoredSession({});
+    const siteMode = VALID_SITE_MODES.has(parsed.siteMode ?? null) ? parsed.siteMode ?? null : null;
+    const liveLayoutMode = VALID_LIVE_LAYOUT_MODES.has(parsed.liveLayoutMode) ? parsed.liveLayoutMode : "broadcast";
+    const livePresentationMode = VALID_PRESENTATION_MODES.has(parsed.livePresentationMode) ? parsed.livePresentationMode : "semi";
+    const livePlaybackRate =
+      Number.isFinite(parsed.livePlaybackRate) && parsed.livePlaybackRate >= 0.35 && parsed.livePlaybackRate <= 2.5
+        ? parsed.livePlaybackRate
+        : 1.25;
+    return {
+      state: {
+        teams,
+        matchHistory,
+        activeView: restoredSession.activeView,
+        selectedTeamId:
+          teams.some((team) => team.id === parsed.state?.selectedTeamId)
+            ? parsed.state?.selectedTeamId
+            : teams[0]?.id ?? null,
+        currentMatch: restoredSession.currentMatch,
+        resultsData: restoredSession.resultsData,
+      },
+      setup: sanitizeMatchSetup(parsed.matchSetup, teams),
+      lastSavedAt: parsed.lastSavedAt ?? null,
+      language: parsed.language === "ru" ? "ru" : "en",
+      siteMode,
+      liveLayoutMode,
+      livePresentationMode,
+      livePlaybackRate,
+      soundDesignEnabled: parsed.soundDesignEnabled ?? false,
+    };
+  } catch {
+    window.localStorage.removeItem(STORAGE_KEY);
+    return {
+      state: baseState,
+      setup: defaultSetup(fallback.teams),
+      lastSavedAt: null,
+      language: "en",
+      siteMode: null,
+      liveLayoutMode: "broadcast",
+      livePresentationMode: "semi",
+      livePlaybackRate: 1.25,
+      soundDesignEnabled: false,
+    };
+  }
+}
+
+function mergeImportedTeams(existingTeams, importedTeams) {
+  const map = new Map(
+    existingTeams.map((team) => [`${team.name.toLowerCase()}::${team.tag.toLowerCase()}`, team])
+  );
+
+  importedTeams.map(normalizeTeam).forEach((team) => {
+    map.set(`${team.name.toLowerCase()}::${team.tag.toLowerCase()}`, team);
+  });
+
+  return [...map.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function appReducer(state, action) {
+  switch (action.type) {
+    case "NAVIGATE":
+      return { ...state, activeView: action.payload };
+    case "SELECT_TEAM":
+      return { ...state, selectedTeamId: action.payload, activeView: "teams" };
+    case "UPSERT_TEAM": {
+      const nextTeam = normalizeTeam(action.payload);
+      const existingIndex = state.teams.findIndex((team) => team.id === nextTeam.id);
+      const nextTeams =
+        existingIndex === -1
+          ? [...state.teams, nextTeam]
+          : state.teams.map((team) => (team.id === nextTeam.id ? nextTeam : team));
+      nextTeams.sort((left, right) => left.name.localeCompare(right.name));
+      return {
+        ...state,
+        teams: nextTeams,
+        selectedTeamId: nextTeam.id,
+        activeView: "teams",
+      };
+    }
+    case "DELETE_TEAM": {
+      const nextTeams = state.teams.filter((team) => team.id !== action.payload);
+      return {
+        ...state,
+        teams: nextTeams,
+        selectedTeamId: nextTeams[0]?.id ?? null,
+      };
+    }
+    case "SET_MATCH":
+      return {
+        ...state,
+        currentMatch: action.payload,
+      };
+    case "START_VETO":
+      return {
+        ...state,
+        currentMatch: action.payload,
+        resultsData: null,
+        activeView: "veto",
+      };
+    case "START_MATCH":
+      if (!state.currentMatch) {
+        return state.resultsData
+          ? { ...state, activeView: "results" }
+          : { ...state, activeView: "match-setup" };
+      }
+      return {
+        ...state,
+        currentMatch: startMatch(state.currentMatch),
+        activeView: "live",
+      };
+    case "FINISH_MATCH": {
+      const finishedMatch = action.payload;
+      const results = normalizeResultsDataShape(finishedMatch.results ?? buildResultsData(finishedMatch));
+      const historyEntry = normalizeHistoryEntry(buildHistoryEntry(results));
+      return {
+        ...state,
+        currentMatch: null,
+        resultsData: results,
+        matchHistory: sanitizeMatchHistory([
+          historyEntry,
+          ...state.matchHistory.filter((entry) => entry.id !== historyEntry.id),
+        ]),
+        activeView: "results",
+      };
+    }
+    case "VIEW_HISTORY_RESULT":
+      return {
+        ...state,
+        currentMatch: null,
+        resultsData: normalizeResultsDataShape(action.payload),
+        activeView: "results",
+      };
+    case "TOGGLE_HISTORY_STATS":
+      return {
+        ...state,
+        matchHistory: sanitizeMatchHistory(
+          state.matchHistory.map((entry) =>
+            entry.id === action.payload
+              ? { ...entry, includedInStats: entry.includedInStats === false }
+              : entry
+          )
+        ),
+      };
+    case "DELETE_HISTORY_MATCH":
+      return {
+        ...state,
+        matchHistory: sanitizeMatchHistory(state.matchHistory.filter((entry) => entry.id !== action.payload)),
+      };
+    case "IMPORT_DATA": {
+      const importedTeams = (action.payload.data.teams ?? []).map(normalizeTeam);
+      const importedHistory = sanitizeMatchHistory(action.payload.data.matchHistory ?? []);
+      if (action.payload.mode === "replace") {
+        return {
+          ...state,
+          teams: importedTeams,
+          matchHistory: importedHistory,
+          selectedTeamId: importedTeams[0]?.id ?? null,
+          currentMatch: null,
+          resultsData: null,
+          activeView: "home",
+        };
+      }
+
+      return {
+        ...state,
+        teams: mergeImportedTeams(state.teams, importedTeams),
+        matchHistory: sanitizeMatchHistory([
+          ...importedHistory,
+          ...state.matchHistory.filter(
+            (entry) => !importedHistory.some((incoming) => incoming.id === entry.id)
+          ),
+        ]),
+      };
+    }
+    case "CLEAR_HISTORY":
+      return {
+        ...state,
+        matchHistory: [],
+      };
+    case "SET_HISTORY":
+      return {
+        ...state,
+        matchHistory: sanitizeMatchHistory(action.payload ?? []),
+      };
+    case "CLEAR_ACTIVE_MATCH":
+      return {
+        ...state,
+        currentMatch: null,
+        activeView: isRenderableResultsData(state.resultsData) ? "results" : "home",
+      };
+    default:
+      return state;
+  }
+}
+
+function isImageLogo(value) {
+  return /^https?:\/\//i.test(value) || /^data:image/i.test(value);
+}
+
+function ensureExactlyOneCaptain(players, captainId) {
+  return players.map((player) => ({
+    ...player,
+    isCaptain: player.id === captainId,
+  }));
+}
+
+function App() {
+  const initialSnapshot = useMemo(() => loadStoredSnapshot(), []);
+  const [state, dispatch] = useReducer(appReducer, initialSnapshot.state);
+  const [matchSetup, setMatchSetup] = useState(initialSnapshot.setup);
+  const [lastSavedAt, setLastSavedAt] = useState(initialSnapshot.lastSavedAt);
+  const [language, setLanguage] = useState(initialSnapshot.language ?? "en");
+  const [siteMode, setSiteMode] = useState(initialSnapshot.siteMode ?? null);
+  const [liveLayoutMode, setLiveLayoutMode] = useState(initialSnapshot.liveLayoutMode ?? "broadcast");
+  const [livePresentationMode, setLivePresentationMode] = useState(initialSnapshot.livePresentationMode ?? "semi");
+  const [livePlaybackRate, setLivePlaybackRate] = useState(initialSnapshot.livePlaybackRate ?? 1.25);
+  const [soundDesignEnabled, setSoundDesignEnabled] = useState(initialSnapshot.soundDesignEnabled ?? false);
+  const [roundPlayback, setRoundPlayback] = useState(null);
+  const [teamDraft, setTeamDraft] = useState(
+    deepClone(state.teams.find((team) => team.id === state.selectedTeamId) ?? createBlankTeam())
+  );
+  const [isNewTeam, setIsNewTeam] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const [confirmState, setConfirmState] = useState(null);
+  const [pendingImport, setPendingImport] = useState(null);
+  const [historyFilters, setHistoryFilters] = useState(createArchiveFilters());
+  const [vetoRevealCount, setVetoRevealCount] = useState(0);
+  const [roundProgress, setRoundProgress] = useState(0);
+  const [selectedPlayerKey, setSelectedPlayerKey] = useState(null);
+  const importInputRef = useRef(null);
+  const dbHydratedRef = useRef(false);
+  const dbSyncTimerRef = useRef(null);
+  const liveMatchRef = useRef(state.currentMatch);
+  const roundIntervalRef = useRef(null);
+  const progressIntervalRef = useRef(null);
+  const roundStartedAtRef = useRef(Date.now());
+  const vetoStartTimeoutRef = useRef(null);
+  const instantMatchHandledRef = useRef(null);
+  const playbackTimersRef = useRef([]);
+  const audioContextRef = useRef(null);
+  const lastSoundCueRef = useRef(null);
+  const t = (key) => (language === "ru" ? COPY_RU[key] : COPY[language]?.[key]) ?? COPY.en[key] ?? key;
+
+  const recoverFromRenderCrash = () => {
+    try {
+      const safeSnapshot = {
+        snapshotVersion: SNAPSHOT_VERSION,
+        state: {
+          teams: state.teams,
+          matchHistory: sanitizeMatchHistory(state.matchHistory),
+          activeView: isRenderableResultsData(state.resultsData) ? "results" : "home",
+          selectedTeamId: state.teams.some((team) => team.id === state.selectedTeamId)
+            ? state.selectedTeamId
+            : state.teams[0]?.id ?? null,
+          currentMatch: null,
+          resultsData: isRenderableResultsData(state.resultsData) ? state.resultsData : null,
+        },
+        matchSetup: sanitizeMatchSetup(matchSetup, state.teams),
+        language: language === "ru" ? "ru" : "en",
+        siteMode,
+        liveLayoutMode,
+        livePresentationMode,
+        livePlaybackRate,
+        soundDesignEnabled,
+        lastSavedAt: new Date().toISOString(),
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSnapshot));
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+    window.location.reload();
+  };
+
+  const resetSavedState = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.location.reload();
+  };
+
+  const pushToast = (message, tone = "success") => {
+    const id = `${Date.now()}_${Math.random()}`;
+    setToasts((current) => [...current, { id, message, tone }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, 3200);
+  };
+
+  const handleMatchRuntimeFailure = (error, message = "Live session recovered after a runtime issue.") => {
+    console.error("Live match runtime failure", error);
+    setRoundPlayback(null);
+    dispatch({ type: "CLEAR_ACTIVE_MATCH" });
+    pushToast(message, "error");
+  };
+
+  const handleSiteModeChange = (mode) => {
+    setSiteMode(mode);
+    setLiveLayoutMode(mode === "mobile" ? "coach" : "broadcast");
+  };
+
+  const playSoundCue = async (cue, options = {}) => {
+    const { force = false } = options;
+    if ((!soundDesignEnabled && !force) || typeof window === "undefined") {
+      return;
+    }
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      return;
+    }
+
+    audioContextRef.current ??= new AudioContextCtor();
+    const ctx = audioContextRef.current;
+
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch {
+        return;
+      }
+    }
+
+    const presets = {
+      kill: [
+        { frequency: 760, duration: 0.05, type: "triangle", gain: 0.05 },
+        { frequency: 620, duration: 0.06, type: "sine", gain: 0.034, delay: 0.05 },
+      ],
+      plant: [
+        { frequency: 420, duration: 0.1, type: "square", gain: 0.042 },
+        { frequency: 520, duration: 0.1, type: "triangle", gain: 0.03, delay: 0.1 },
+      ],
+      defuse: [
+        { frequency: 520, duration: 0.08, type: "triangle", gain: 0.04 },
+        { frequency: 760, duration: 0.1, type: "triangle", gain: 0.032, delay: 0.08 },
+      ],
+      clutch: [
+        { frequency: 660, duration: 0.08, type: "sawtooth", gain: 0.038 },
+        { frequency: 880, duration: 0.09, type: "triangle", gain: 0.038, delay: 0.08 },
+        { frequency: 1040, duration: 0.11, type: "triangle", gain: 0.034, delay: 0.17 },
+      ],
+      preview: [
+        { frequency: 520, duration: 0.08, type: "triangle", gain: 0.05 },
+        { frequency: 760, duration: 0.1, type: "triangle", gain: 0.042, delay: 0.1 },
+      ],
+    };
+
+    (presets[cue] ?? []).forEach((tone) => {
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      const startAt = ctx.currentTime + (tone.delay ?? 0);
+      oscillator.type = tone.type;
+      oscillator.frequency.setValueAtTime(tone.frequency, startAt);
+      gainNode.gain.setValueAtTime(0.0001, startAt);
+      gainNode.gain.exponentialRampToValueAtTime(tone.gain, startAt + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + tone.duration);
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + tone.duration + 0.02);
+    });
+  };
+
+  const handleSoundDesignChange = (nextEnabled) => {
+    setSoundDesignEnabled(nextEnabled);
+    if (nextEnabled) {
+      void playSoundCue("preview", { force: true });
+    }
+  };
+
+  useEffect(() => {
+    liveMatchRef.current = state.currentMatch;
+  }, [state.currentMatch]);
+
+  useEffect(() => {
+    if (!soundDesignEnabled || state.activeView !== "live" || livePresentationMode !== "live") {
+      lastSoundCueRef.current = null;
+      return;
+    }
+
+    const currentEvent =
+      roundPlayback?.summary?.timeline?.[
+        Math.max(0, Math.min((roundPlayback?.summary?.timeline?.length ?? 1) - 1, roundPlayback?.frameIndex ?? -1))
+      ] ?? null;
+
+    if (!currentEvent) {
+      return;
+    }
+
+    const cue =
+      currentEvent.kind === "kill"
+        ? "kill"
+        : currentEvent.bombPlanted
+          ? "plant"
+          : currentEvent.defuse
+            ? "defuse"
+            : currentEvent.kind === "clutch"
+              ? "clutch"
+              : null;
+
+    if (!cue) {
+      return;
+    }
+
+    const cueId = `${roundPlayback?.summary?.roundNumber}:${currentEvent.id}:${cue}`;
+    if (lastSoundCueRef.current === cueId) {
+      return;
+    }
+
+    lastSoundCueRef.current = cueId;
+    void playSoundCue(cue);
+  }, [soundDesignEnabled, state.activeView, livePresentationMode, roundPlayback]);
+
+  useEffect(() => {
+    if (isNewTeam) {
+      return;
+    }
+
+    const selected = state.teams.find((team) => team.id === state.selectedTeamId);
+    if (selected) {
+      setTeamDraft(deepClone(selected));
+    }
+  }, [state.selectedTeamId, state.teams, isNewTeam]);
+
+  useEffect(() => {
+    if (!state.teams.length) {
+      return;
+    }
+
+    setMatchSetup((current) => {
+      const next = { ...current };
+      if (!state.teams.some((team) => team.id === next.teamAId)) {
+        next.teamAId = state.teams[0]?.id ?? "";
+      }
+      if (!state.teams.some((team) => team.id === next.teamBId) || next.teamBId === next.teamAId) {
+        next.teamBId =
+          state.teams.find((team) => team.id !== next.teamAId)?.id ?? state.teams[0]?.id ?? "";
+      }
+      return next;
+    });
+  }, [state.teams]);
+
+  useEffect(() => {
+    const serialized = JSON.stringify({
+      snapshotVersion: SNAPSHOT_VERSION,
+      state,
+      matchSetup,
+      language,
+      siteMode,
+      liveLayoutMode,
+      livePresentationMode,
+      livePlaybackRate,
+      soundDesignEnabled,
+      lastSavedAt: new Date().toISOString(),
+    });
+    // Persist to localStorage defensively — when the DB holds many matches the
+    // full snapshot can exceed the ~5MB localStorage quota. The DB is the
+    // authoritative store, so it is safe to skip/best-effort the local cache.
+    try {
+      window.localStorage.setItem(STORAGE_KEY, serialized);
+    } catch (quotaErr) {
+      // Try a trimmed snapshot (no matchHistory data) so UI prefs still persist.
+      try {
+        const trimmed = JSON.stringify({
+          snapshotVersion: SNAPSHOT_VERSION,
+          state: { ...state, matchHistory: [] },
+          matchSetup,
+          language,
+          siteMode,
+          liveLayoutMode,
+          livePresentationMode,
+          livePlaybackRate,
+          soundDesignEnabled,
+          lastSavedAt: new Date().toISOString(),
+        });
+        window.localStorage.setItem(STORAGE_KEY, trimmed);
+      } catch {
+        // give up silently — DB sync still works
+      }
+    }
+    setLastSavedAt(new Date().toISOString());
+  }, [state, matchSetup, language, siteMode, liveLayoutMode, livePresentationMode, livePlaybackRate, soundDesignEnabled]);
+
+  // ---- Database hydration: load persisted matchHistory from the server ----
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/matches", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const dbEntries = Array.isArray(data?.entries) ? data.entries : [];
+        if (cancelled) return;
+        if (dbEntries.length > 0) {
+          // Server is the source of truth — replace local history.
+          dispatch({ type: "SET_HISTORY", payload: dbEntries });
+        }
+        dbHydratedRef.current = true;
+      } catch (err) {
+        console.error("DB hydration failed", err);
+        dbHydratedRef.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---- Database sync: debounce-push matchHistory changes to the server ----
+  useEffect(() => {
+    if (!dbHydratedRef.current) return;
+    window.clearTimeout(dbSyncTimerRef.current);
+    dbSyncTimerRef.current = window.setTimeout(async () => {
+      try {
+        await fetch("/api/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entries: state.matchHistory }),
+        });
+      } catch (err) {
+        console.error("DB sync failed", err);
+      }
+    }, 900);
+    return () => window.clearTimeout(dbSyncTimerRef.current);
+  }, [state.matchHistory]);
+
+  // Debug: surface any uncaught render/runtime error to the console + window
+  useEffect(() => {
+    const onError = (e) => {
+      const stack = e.error?.stack || e.message;
+      console.error("[uncaught]", stack);
+      window.__caughtError = stack;
+    };
+    const onReject = (e) => {
+      const stack = e.reason?.stack || String(e.reason);
+      console.error("[unhandled]", stack);
+      window.__caughtError = stack;
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onReject);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onReject);
+    };
+  }, []);
+
+  useEffect(() => {
+    const phoneLiveMode =
+      state.activeView === "live" &&
+      state.currentMatch &&
+      (siteMode === "mobile" || liveLayoutMode === "phone");
+    document.documentElement.classList.toggle("phone-live", Boolean(phoneLiveMode));
+    document.body.classList.toggle("phone-live", Boolean(phoneLiveMode));
+
+    return () => {
+      document.documentElement.classList.remove("phone-live");
+      document.body.classList.remove("phone-live");
+    };
+  }, [state.activeView, state.currentMatch, liveLayoutMode, siteMode]);
+
+  useEffect(() => {
+    if (!state.currentMatch || state.currentMatch.status !== "veto" || state.activeView !== "veto") {
+      return;
+    }
+
+    window.clearTimeout(vetoStartTimeoutRef.current);
+    setVetoRevealCount(0);
+    let reveal = 0;
+    const intervalId = window.setInterval(() => {
+      reveal += 1;
+      setVetoRevealCount(Math.min(reveal, state.currentMatch.veto.steps.length));
+      if (reveal >= state.currentMatch.veto.steps.length) {
+        window.clearInterval(intervalId);
+        vetoStartTimeoutRef.current = window.setTimeout(() => {
+          dispatch({ type: "START_MATCH" });
+          pushToast("Veto complete. Knife rounds are in and the series is live.");
+        }, 900);
+      }
+    }, 650);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(vetoStartTimeoutRef.current);
+    };
+  }, [state.currentMatch, state.activeView]);
+
+  useEffect(() => {
+    window.clearInterval(roundIntervalRef.current);
+    window.clearInterval(progressIntervalRef.current);
+    playbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    playbackTimersRef.current = [];
+    setRoundProgress(0);
+
+    if (!state.currentMatch || state.currentMatch.status !== "live") {
+      instantMatchHandledRef.current = null;
+      setRoundPlayback(null);
+      return undefined;
+    }
+
+    if (state.currentMatch.speed === "instant") {
+      if (instantMatchHandledRef.current === state.currentMatch.id) {
+        return undefined;
+      }
+      instantMatchHandledRef.current = state.currentMatch.id;
+      try {
+        const finished = simulateEntireMatch(state.currentMatch);
+        dispatch({ type: "FINISH_MATCH", payload: finished });
+        pushToast("Match finished instantly.");
+      } catch (error) {
+        handleMatchRuntimeFailure(error, "Instant simulation recovered after a runtime issue.");
+      }
+      return undefined;
+    }
+
+    const baseSpeed = SPEED_OPTIONS.find((option) => option.id === state.currentMatch.speed)?.intervalMs ?? 5000;
+    const speed = Math.round(baseSpeed * livePlaybackRate);
+    const startProgressTimer = (durationMs) => {
+      roundStartedAtRef.current = Date.now();
+      progressIntervalRef.current = window.setInterval(() => {
+        setRoundProgress(
+          clamp((Date.now() - roundStartedAtRef.current) / Math.max(1, durationMs), 0, 1)
+        );
+      }, 100);
+    };
+    setRoundPlayback(null);
+
+    if (livePresentationMode === "live") {
+      const currentMatch = liveMatchRef.current;
+      if (!currentMatch || currentMatch.status !== "live") {
+        return undefined;
+      }
+
+      let nextMatch;
+      try {
+        nextMatch = stepMatch(currentMatch);
+      } catch (error) {
+        handleMatchRuntimeFailure(error);
+        return undefined;
+      }
+      const playbackSummary = nextMatch.latestRound;
+      const playbackFrames = playbackSummary?.timeline ?? [];
+      const playbackPreset =
+        currentMatch.speed === "slow"
+          ? { preRollMs: 520, postRollMs: 760, minFrameMs: 300, maxFrameMs: 520, extraBudgetMs: 1200 }
+          : { preRollMs: 900, postRollMs: 1100, minFrameMs: 520, maxFrameMs: 900, extraBudgetMs: 2200 };
+      const scaledPreset = {
+        preRollMs: Math.round(playbackPreset.preRollMs * livePlaybackRate),
+        postRollMs: Math.round(playbackPreset.postRollMs * livePlaybackRate),
+        minFrameMs: Math.round(playbackPreset.minFrameMs * livePlaybackRate),
+        maxFrameMs: Math.round(playbackPreset.maxFrameMs * livePlaybackRate),
+        extraBudgetMs: Math.round(playbackPreset.extraBudgetMs * livePlaybackRate),
+      };
+      const frameDelay = clamp(
+        Math.floor((speed + scaledPreset.extraBudgetMs) / Math.max(1, playbackFrames.length || 1)),
+        scaledPreset.minFrameMs,
+        scaledPreset.maxFrameMs
+      );
+      const liveRoundDuration =
+        scaledPreset.preRollMs + playbackFrames.length * frameDelay + scaledPreset.postRollMs;
+      const commitDelay = Math.max(speed, liveRoundDuration);
+
+      startProgressTimer(commitDelay);
+
+      setRoundPlayback({
+        summary: playbackSummary,
+        frameIndex: -1,
+        totalFrames: playbackFrames.length,
+      });
+
+      playbackFrames.forEach((frame, index) => {
+        const timerId = window.setTimeout(() => {
+          setRoundPlayback((current) =>
+            current?.summary?.roundNumber === playbackSummary?.roundNumber
+              ? { ...current, frameIndex: index }
+              : current
+          );
+        }, scaledPreset.preRollMs + frameDelay * index);
+        playbackTimersRef.current.push(timerId);
+      });
+
+      roundIntervalRef.current = window.setTimeout(() => {
+        setRoundPlayback(null);
+        if (nextMatch.status === "finished") {
+          dispatch({ type: "FINISH_MATCH", payload: nextMatch });
+          pushToast("Series complete.");
+        } else {
+          dispatch({ type: "SET_MATCH", payload: nextMatch });
+        }
+      }, commitDelay);
+
+      return () => {
+        window.clearTimeout(roundIntervalRef.current);
+        window.clearInterval(progressIntervalRef.current);
+        playbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+        playbackTimersRef.current = [];
+      };
+    }
+
+    startProgressTimer(speed);
+
+    roundIntervalRef.current = window.setInterval(() => {
+      const currentMatch = liveMatchRef.current;
+      if (!currentMatch || currentMatch.status !== "live") {
+        return;
+      }
+
+      roundStartedAtRef.current = Date.now();
+      setRoundProgress(0);
+      let nextMatch;
+      try {
+        nextMatch = stepMatch(currentMatch);
+      } catch (error) {
+        window.clearInterval(roundIntervalRef.current);
+        window.clearInterval(progressIntervalRef.current);
+        handleMatchRuntimeFailure(error);
+        return;
+      }
+      if (nextMatch.status === "finished") {
+        dispatch({ type: "FINISH_MATCH", payload: nextMatch });
+        pushToast("Series complete.");
+        window.clearInterval(roundIntervalRef.current);
+        window.clearInterval(progressIntervalRef.current);
+      } else {
+        dispatch({ type: "SET_MATCH", payload: nextMatch });
+      }
+    }, speed);
+
+    return () => {
+      window.clearInterval(roundIntervalRef.current);
+      window.clearInterval(progressIntervalRef.current);
+      playbackTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      playbackTimersRef.current = [];
+    };
+  }, [state.currentMatch, livePresentationMode, livePlaybackRate]);
+
+  const selectedTeam = state.teams.find((team) => team.id === state.selectedTeamId) ?? null;
+  const archiveOptions = useMemo(() => buildArchiveOptions(state.matchHistory), [state.matchHistory]);
+  const filteredHistory = useMemo(
+    () => filterArchiveEntries(state.matchHistory, historyFilters),
+    [state.matchHistory, historyFilters]
+  );
+  const statsEntries = useMemo(
+    () => filterArchiveEntries(state.matchHistory, historyFilters, { statsOnly: true }),
+    [state.matchHistory, historyFilters]
+  );
+  const archiveOverview = useMemo(() => buildArchiveOverview(state.matchHistory), [state.matchHistory]);
+  const statsViewModel = useMemo(
+    () => ({
+      players: aggregatePlayerStats(statsEntries),
+      teams: aggregateTeamStats(statsEntries),
+      maps: aggregateMapStats(statsEntries),
+      tournaments: aggregateTournamentStats(statsEntries),
+    }),
+    [statsEntries]
+  );
+
+  const canStartMatch =
+    matchSetup.teamAId &&
+    matchSetup.teamBId &&
+    matchSetup.teamAId !== matchSetup.teamBId &&
+    state.teams.find((team) => team.id === matchSetup.teamAId)?.players.length === 5 &&
+    state.teams.find((team) => team.id === matchSetup.teamBId)?.players.length === 5;
+
+  const handleSaveTeam = () => {
+    if (teamDraft.players.length !== 5) {
+      pushToast("Teams need exactly 5 players before they can be saved.", "error");
+      return;
+    }
+
+    const captain = teamDraft.players.find((player) => player.isCaptain);
+    if (!captain) {
+      pushToast("Choose a captain before saving the team.", "error");
+      return;
+    }
+
+    dispatch({ type: "UPSERT_TEAM", payload: normalizeTeam(teamDraft) });
+    setIsNewTeam(false);
+    pushToast("Team saved.");
+  };
+
+  const handleStartVeto = () => {
+    const teamA = state.teams.find((team) => team.id === matchSetup.teamAId);
+    const teamB = state.teams.find((team) => team.id === matchSetup.teamBId);
+    if (!teamA || !teamB) {
+      return;
+    }
+
+    const match = createMatchFromSetup(teamA, teamB, matchSetup);
+    dispatch({ type: "START_VETO", payload: match });
+    pushToast("Veto started.");
+  };
+
+  const handleExport = () => {
+    const payload = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      teams: state.teams,
+      matchHistory: state.matchHistory,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `cs2sim_data_${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    pushToast("Data exported.");
+  };
+
+  const handleImport = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      setPendingImport(parsed);
+    } catch {
+      pushToast("That JSON file could not be imported.", "error");
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  return (
+    <LanguageContext.Provider value={{ language, setLanguage, t }}>
+      <AppErrorBoundary onRecover={recoverFromRenderCrash} onResetState={resetSavedState}>
+        <div className="min-h-screen text-text">{renderApp()}</div>
+      </AppErrorBoundary>
+    </LanguageContext.Provider>
+  );
+
+  function renderApp() {
+    const resolvedCurrentMatch = isRenderableMatch(state.currentMatch) ? state.currentMatch : null;
+    const resultsCandidate = recoverResultsData(resolvedCurrentMatch, state.resultsData);
+    const resolvedResultsData = isRenderableResultsData(resultsCandidate) ? resultsCandidate : null;
+    const resolvedActiveView =
+      (state.activeView === "live" || state.activeView === "veto") && !resolvedCurrentMatch
+        ? resolvedResultsData
+          ? "results"
+          : state.activeView === "veto"
+            ? "match-setup"
+            : "home"
+        : state.activeView === "results" && !resolvedResultsData
+          ? "home"
+          : state.activeView;
+    const liveFocus = resolvedActiveView === "live" && resolvedCurrentMatch;
+    const effectiveLiveLayout =
+      siteMode === "mobile"
+        ? liveLayoutMode === "coach"
+          ? "coach"
+          : "phone"
+        : liveLayoutMode;
+    const mobileSite = siteMode === "mobile";
+    const phoneLiveMode =
+      liveFocus && (effectiveLiveLayout === "phone" || (mobileSite && effectiveLiveLayout === "coach"));
+    return (
+      <div className={classNames(phoneLiveMode ? "h-[100dvh] overflow-hidden bg-hero-grid" : "min-h-screen bg-hero-grid")}>
+        {!phoneLiveMode &&
+          (mobileSite ? (
+              <MobileHeader
+              activeView={resolvedActiveView}
+              siteMode={siteMode}
+              onSiteModeChange={handleSiteModeChange}
+              language={language}
+              onLanguageChange={setLanguage}
+            />
+          ) : (
+            <TopNav
+              activeView={resolvedActiveView}
+              onNavigate={(view) => dispatch({ type: "NAVIGATE", payload: view })}
+              siteMode={siteMode}
+              onSiteModeChange={handleSiteModeChange}
+            />
+          ))}
+        <div
+          className={classNames(
+            "mx-auto flex gap-6",
+            phoneLiveMode
+              ? "h-[100dvh] w-screen overflow-hidden px-0 py-0"
+              : mobileSite
+                ? "w-screen px-3 py-3 pb-24"
+              : liveFocus
+                ? "w-[min(1840px,99vw)] px-3 py-3"
+                : "w-[min(1600px,95vw)] px-4 py-6"
+          )}
+        >
+          <div className="flex-1">
+            {resolvedActiveView === "home" && (
+              <HomeView
+                teams={state.teams}
+                history={state.matchHistory}
+                mobile={mobileSite}
+                onQuickStart={() => dispatch({ type: "NAVIGATE", payload: "match-setup" })}
+                onOpenTeams={() => dispatch({ type: "NAVIGATE", payload: "teams" })}
+                onOpenHistory={() => dispatch({ type: "NAVIGATE", payload: "history" })}
+              />
+            )}
+            {resolvedActiveView === "teams" && (
+              <TeamsView
+                teams={state.teams}
+                mobile={mobileSite}
+                selectedTeamId={state.selectedTeamId}
+                teamDraft={teamDraft}
+                isNewTeam={isNewTeam}
+                onSelectTeam={(teamId) => {
+                  setIsNewTeam(false);
+                  dispatch({ type: "SELECT_TEAM", payload: teamId });
+                }}
+                onDraftChange={setTeamDraft}
+                onNewTeam={() => {
+                  setIsNewTeam(true);
+                  setTeamDraft(createBlankTeam());
+                }}
+                onSaveTeam={handleSaveTeam}
+                onDeleteTeam={() =>
+                  setConfirmState({
+                    type: "delete-team",
+                    title: "Delete Team",
+                    message: `Delete ${teamDraft.name || teamDraft.tag || "this team"}?`,
+                    payload: teamDraft.id,
+                  })
+                }
+                onExport={handleExport}
+                onImport={() => importInputRef.current?.click()}
+              />
+            )}
+            {resolvedActiveView === "match-setup" && (
+              <MatchSetupView
+                teams={state.teams}
+                mobile={mobileSite}
+                setup={matchSetup}
+                onSetupChange={setMatchSetup}
+                onStartVeto={handleStartVeto}
+                canStartMatch={canStartMatch}
+              />
+            )}
+            {resolvedActiveView === "veto" && resolvedCurrentMatch && (
+              <VetoView match={resolvedCurrentMatch} revealedCount={vetoRevealCount} mobile={mobileSite} />
+            )}
+            {resolvedActiveView === "live" && resolvedCurrentMatch && (
+              <LiveMatchView
+                match={resolvedCurrentMatch}
+                roundProgress={roundProgress}
+                mobileSite={mobileSite}
+                layoutMode={effectiveLiveLayout}
+                onLayoutModeChange={setLiveLayoutMode}
+                presentationMode={livePresentationMode}
+                onPresentationModeChange={setLivePresentationMode}
+                playbackRate={livePlaybackRate}
+                onPlaybackRateChange={setLivePlaybackRate}
+                soundDesignEnabled={soundDesignEnabled}
+                onSoundDesignChange={handleSoundDesignChange}
+                roundPlayback={roundPlayback}
+                fullscreen={phoneLiveMode}
+                siteMode={siteMode}
+                onSiteModeChange={handleSiteModeChange}
+              />
+            )}
+            {resolvedActiveView === "results" && resolvedResultsData && (
+              <ResultsView results={resolvedResultsData} mobile={mobileSite} onSelectPlayer={setSelectedPlayerKey} />
+            )}
+            {resolvedActiveView === "history" && (
+              <HistoryView
+                mobile={mobileSite}
+                filters={historyFilters}
+                onFiltersChange={setHistoryFilters}
+                options={archiveOptions}
+                overview={archiveOverview}
+                entries={filteredHistory}
+                onOpen={(entry) =>
+                  dispatch({ type: "VIEW_HISTORY_RESULT", payload: entry.data })
+                }
+                onToggleStats={(matchId) => dispatch({ type: "TOGGLE_HISTORY_STATS", payload: matchId })}
+                onDeleteMatch={(matchId) =>
+                  setConfirmState({
+                    type: "delete-history-match",
+                    title: "Delete Match",
+                    message: "Remove this match from the archive and all stats?",
+                    payload: matchId,
+                  })
+                }
+                onClear={() =>
+                  setConfirmState({
+                    type: "clear-history",
+                    title: "Clear History",
+                    message: "Remove all stored match history?",
+                  })
+                }
+              />
+            )}
+            {resolvedActiveView === "stats" && (
+              <StatsView
+                mobile={mobileSite}
+                filters={historyFilters}
+                onFiltersChange={setHistoryFilters}
+                options={archiveOptions}
+                overview={archiveOverview}
+                stats={statsViewModel}
+                onSelectPlayer={setSelectedPlayerKey}
+              />
+            )}
+          </div>
+          <aside className={classNames("hidden w-[300px] xl:block", liveFocus && "xl:hidden", phoneLiveMode && "hidden", mobileSite && "xl:hidden")}>
+            <SideRail
+              selectedTeam={selectedTeam}
+              currentMatch={resolvedCurrentMatch}
+              lastSavedAt={lastSavedAt}
+              onExport={handleExport}
+              onImport={() => importInputRef.current?.click()}
+            />
+          </aside>
+        </div>
+        {!liveFocus && !mobileSite && (
+          <footer className="border-t border-border bg-surface/80 px-6 py-3 text-sm text-muted">
+            {t("last_saved")}: {lastSavedAt ? new Date(lastSavedAt).toLocaleString() : t("not_saved")}
+          </footer>
+        )}
+        {mobileSite && !phoneLiveMode && (
+            <MobileBottomNav
+              activeView={resolvedActiveView}
+              onNavigate={(view) => dispatch({ type: "NAVIGATE", payload: view })}
+            />
+          )}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={handleImport}
+        />
+        <ToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
+        {confirmState && (
+          <ConfirmModal
+            title={confirmState.title}
+            message={confirmState.message}
+            onCancel={() => setConfirmState(null)}
+            onConfirm={() => {
+              if (confirmState.type === "delete-team") {
+                dispatch({ type: "DELETE_TEAM", payload: confirmState.payload });
+                setIsNewTeam(false);
+                pushToast("Team deleted.");
+              }
+              if (confirmState.type === "clear-history") {
+                dispatch({ type: "CLEAR_HISTORY" });
+                pushToast("History cleared.");
+              }
+              if (confirmState.type === "delete-history-match") {
+                dispatch({ type: "DELETE_HISTORY_MATCH", payload: confirmState.payload });
+                pushToast("Match deleted from archive.");
+              }
+              setConfirmState(null);
+            }}
+          />
+        )}
+        {pendingImport && (
+          <ImportModal
+            onMerge={() => {
+              dispatch({ type: "IMPORT_DATA", payload: { mode: "merge", data: pendingImport } });
+              setPendingImport(null);
+              pushToast("Data merged.");
+            }}
+            onReplace={() => {
+              dispatch({ type: "IMPORT_DATA", payload: { mode: "replace", data: pendingImport } });
+              setPendingImport(null);
+              pushToast("Data replaced.");
+            }}
+            onCancel={() => setPendingImport(null)}
+          />
+        )}
+        {selectedPlayerKey && (
+          <PlayerDetailModal
+            playerKey={selectedPlayerKey}
+            matchHistory={state.matchHistory}
+            onClose={() => setSelectedPlayerKey(null)}
+          />
+        )}
+        {!siteMode && (
+          <SiteModeModal
+            onChoose={(mode) => {
+              handleSiteModeChange(mode);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+}
+
+export default App;
+
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("App render crash", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-hero-grid px-6 py-10 text-text">
+          <div className="mx-auto flex min-h-[70vh] max-w-2xl items-center justify-center">
+            <div className="panel w-full rounded-3xl border border-red-500/25 bg-card/90 p-8 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-300">
+                <AlertTriangle size={30} />
+              </div>
+              <h1 className="mt-5 font-display text-4xl text-text">Live session crashed</h1>
+              <p className="mt-3 text-base leading-7 text-muted">
+                The simulator hit a render error. You can recover the saved teams and history, or fully reset the local snapshot.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={this.props.onRecover}
+                  className="rounded-xl border border-accent bg-accent/10 px-5 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-accent transition hover:bg-accent/15"
+                >
+                  Recover Session
+                </button>
+                <button
+                  type="button"
+                  onClick={this.props.onResetState}
+                  className="rounded-xl border border-border bg-surface px-5 py-3 text-sm font-semibold uppercase tracking-[0.16em] text-text transition hover:border-red-400/40 hover:text-red-300"
+                >
+                  Reset Local State
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function renderLogo(logo, fallback = "T") {
+  if (!logo) {
+    return <span className="text-2xl">{fallback}</span>;
+  }
+
+  if (isImageLogo(logo)) {
+    return <img src={logo} alt="" className="h-10 w-10 rounded-lg object-cover" />;
+  }
+
+  return <span className="text-2xl">{logo}</span>;
+}
+
+function classNames(...values) {
+  return values.filter(Boolean).join(" ");
+}
+
+function roundMetric(value, digits = 0) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function normalizeRadarLookupKey(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function pointInPolygon(point, polygon) {
+  let inside = false;
+
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const [xi, yi] = polygon[index];
+    const [xj, yj] = polygon[previous];
+    const intersects =
+      yi > point[1] !== yj > point[1] &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / ((yj - yi) || 0.000001) + xi;
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function polygonBounds(polygon) {
+  return polygon.reduce(
+    (bounds, [x, y]) => ({
+      minX: Math.min(bounds.minX, x),
+      maxX: Math.max(bounds.maxX, x),
+      minY: Math.min(bounds.minY, y),
+      maxY: Math.max(bounds.maxY, y),
+    }),
+    { minX: 1, maxX: 0, minY: 1, maxY: 0 }
+  );
+}
+
+function polygonCentroid(polygon) {
+  if (!polygon?.length) {
+    return [0.5, 0.5];
+  }
+
+  const [sumX, sumY] = polygon.reduce(
+    (totals, [x, y]) => [totals[0] + x, totals[1] + y],
+    [0, 0]
+  );
+
+  return [sumX / polygon.length, sumY / polygon.length];
+}
+
+function resolveRadarPosition(mapName, zone, site) {
+  const normalizedZone = normalizeRadarLookupKey(zone);
+  const normalizedSite = normalizeRadarLookupKey(site);
+  const siteScopedKey = normalizedZone && normalizedSite ? `${normalizedZone}::${normalizedSite}` : "";
+  const polygonAliases = RADAR_ZONE_ALIASES[mapName] ?? {};
+  const polygonMap = RADAR_ZONE_POLYGONS[mapName] ?? {};
+
+  const polygonLabel =
+    (siteScopedKey && polygonAliases[siteScopedKey]) ||
+    polygonAliases[normalizedZone] ||
+    (normalizedSite && polygonAliases[`site::${normalizedSite}`]) ||
+    null;
+
+  if (polygonLabel && polygonMap[polygonLabel]) {
+    return polygonMap[polygonLabel];
+  }
+
+  const mapZones = RADAR_ZONE_POSITIONS[mapName] ?? {};
+  const normalizedZoneEntries = Object.fromEntries(
+    Object.entries(mapZones).map(([key, value]) => [normalizeRadarLookupKey(key), value])
+  );
+
+  if (normalizedZone) {
+    if (siteScopedKey && normalizedZoneEntries[siteScopedKey]) {
+      return normalizedZoneEntries[siteScopedKey];
+    }
+    if (normalizedZoneEntries[normalizedZone]) {
+      return normalizedZoneEntries[normalizedZone];
+    }
+  }
+
+  return RADAR_SITE_FALLBACKS[mapName]?.[site] ?? { x: 0.5, y: 0.5, level: "upper" };
+}
+
+function resolveRadarZoneLabel(mapName, zone, site) {
+  const normalizedZone = normalizeRadarLookupKey(zone);
+  const normalizedSite = normalizeRadarLookupKey(site);
+  const siteScopedKey = normalizedZone && normalizedSite ? `${normalizedZone}::${normalizedSite}` : "";
+  const aliasMap = RADAR_ZONE_ALIASES[mapName] ?? {};
+  return (
+    (siteScopedKey && aliasMap[siteScopedKey]) ||
+    aliasMap[normalizedZone] ||
+    (normalizedSite && aliasMap[`site::${normalizedSite}`]) ||
+    zone ||
+    site ||
+    "unknown"
+  );
+}
+
+function getRadarViewBox(mapName, level = "upper") {
+  return RADAR_VIEWBOXES[mapName]?.[level] ?? { left: 0, top: 0, width: 1, height: 1 };
+}
+
+function hashRadarSeed(value = "") {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function seededRadarUnit(seed, salt = 0) {
+  const hash = hashRadarSeed(`${seed}:${salt}`);
+  return (hash % 10000) / 9999;
+}
+
+function spawnInRadarRegion(region, seed, mapName) {
+  const level = region.level ?? "upper";
+  const viewBox = getRadarViewBox(mapName, level);
+  if (region.polygon?.length) {
+    const polygon = region.polygon;
+    const bounds = polygonBounds(polygon);
+    let sampledPoint = null;
+
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const sample = [
+        bounds.minX + seededRadarUnit(seed, attempt * 2 + 1) * Math.max(0.0001, bounds.maxX - bounds.minX),
+        bounds.minY + seededRadarUnit(seed, attempt * 2 + 2) * Math.max(0.0001, bounds.maxY - bounds.minY),
+      ];
+
+      if (pointInPolygon(sample, polygon)) {
+        sampledPoint = sample;
+        break;
+      }
+    }
+
+    const [localX, localY] = sampledPoint ?? polygonCentroid(polygon);
+    const x =
+      region.space === "absolute"
+        ? localX
+        : viewBox.left + clamp(localX, 0.02, 0.98) * viewBox.width;
+    const y =
+      region.space === "absolute"
+        ? localY
+        : viewBox.top + clamp(localY, 0.02, 0.98) * viewBox.height;
+
+    return {
+      ...region,
+      x: clamp(x, 0.02, 0.98),
+      y: clamp(y, 0.02, 0.98),
+    };
+  }
+
+  const anchorIndex = region.anchors?.length
+    ? Math.min(region.anchors.length - 1, Math.floor(seededRadarUnit(seed, 0) * region.anchors.length))
+    : -1;
+  const anchor = anchorIndex >= 0 ? region.anchors[anchorIndex] : [region.x, region.y];
+  const localWidth = (region.anchors ? region.radius ?? 0.022 : region.width ?? 0.06) * (region.anchors ? 0.36 : 0.62);
+  const localHeight = (region.anchors ? region.radius ?? 0.022 : region.height ?? 0.06) * (region.anchors ? 0.36 : 0.62);
+  const localX = anchor[0] - localWidth / 2 + seededRadarUnit(seed, 1) * localWidth;
+  const localY = anchor[1] - localHeight / 2 + seededRadarUnit(seed, 2) * localHeight;
+  const x =
+    region.space === "absolute"
+      ? localX
+      : viewBox.left + clamp(localX, 0.02, 0.98) * viewBox.width;
+  const y =
+    region.space === "absolute"
+      ? localY
+      : viewBox.top + clamp(localY, 0.02, 0.98) * viewBox.height;
+  return {
+    ...region,
+    x: clamp(x, 0.02, 0.98),
+    y: clamp(y, 0.02, 0.98),
+  };
+}
+
+function separateRadarMarker(position, priorMarkers, seed, mapName) {
+  const level = position.level ?? "upper";
+  const relevantMarkers = priorMarkers.filter(
+    (marker) => marker.level === level && marker.zone === position.zone
+  );
+
+  if (!relevantMarkers.length) {
+    return position;
+  }
+
+  const viewBox = getRadarViewBox(mapName, level);
+  const minDistance = level === "lower" ? 0.017 : 0.024;
+
+  const isFarEnough = (candidate) =>
+    relevantMarkers.every((marker) => Math.hypot(candidate.x - marker.x, candidate.y - marker.y) >= minDistance);
+
+  if (isFarEnough(position)) {
+    return position;
+  }
+
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const candidate = spawnInRadarRegion(position, `${seed}:retry:${attempt}`, mapName);
+    if (isFarEnough(candidate)) {
+      return {
+        ...position,
+        x: clamp(candidate.x, viewBox.left + 0.015 * viewBox.width, viewBox.left + 0.985 * viewBox.width),
+        y: clamp(candidate.y, viewBox.top + 0.015 * viewBox.height, viewBox.top + 0.985 * viewBox.height),
+      };
+    }
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const angle = seededRadarUnit(seed, 50 + attempt * 2) * Math.PI * 2;
+    const distance = minDistance * (0.55 + seededRadarUnit(seed, 51 + attempt * 2) * 0.45);
+    const candidate = {
+      ...position,
+      x: clamp(position.x + Math.cos(angle) * distance, viewBox.left + 0.015 * viewBox.width, viewBox.left + 0.985 * viewBox.width),
+      y: clamp(position.y + Math.sin(angle) * distance, viewBox.top + 0.015 * viewBox.height, viewBox.top + 0.985 * viewBox.height),
+    };
+    if (isFarEnough(candidate)) {
+      return candidate;
+    }
+  }
+
+  return position;
+}
+
+function buildRadarMarkers(events = [], mapName) {
+  const placedMarkers = [];
+  const kills = events
+    .filter((event) => event.kind === "kill")
+    .map((event, index, source) => {
+      const position = spawnInRadarRegion(
+        resolveRadarPosition(mapName, event.zone, event.site),
+        `${mapName}:${event.zone ?? event.site ?? "unknown"}:${event.id}:${index}`,
+        mapName
+      );
+      const separated = separateRadarMarker(
+        {
+          ...position,
+          zone: event.zone,
+        },
+        placedMarkers,
+        `${event.id}:${event.zone ?? "zone"}:${index}`,
+        mapName
+      );
+      const marker = {
+        id: `${event.id}_${index}`,
+        x: separated.x,
+        y: separated.y,
+        level: separated.level ?? "upper",
+        zone: event.zone,
+        zoneLabel: resolveRadarZoneLabel(mapName, event.zone, event.site),
+        site: event.site,
+        victimTeamKey: event.victimTeamKey,
+        victimSide: event.victimSide,
+        clock: event.clock,
+        label: event.label,
+        openingKill: event.openingKill,
+        recent: index === source.length - 1,
+      };
+      placedMarkers.push(marker);
+      return marker;
+    });
+
+  return kills;
+}
+
+function weaponExpectancyWeight(weaponType) {
+  switch (weaponType) {
+    case "awp":
+      return 1.26;
+    case "rifle":
+      return 1.08;
+    case "smg":
+      return 0.93;
+    case "shotgun":
+      return 0.88;
+    case "pistol":
+      return 0.76;
+    default:
+      return 0.72;
+  }
+}
+
+function estimateTeamSnapshotScore(players, side, mapName, clockSeconds, bombPlanted) {
+  const alivePlayers = players.filter((player) => player.alive);
+  if (!alivePlayers.length) {
+    return 0.02;
+  }
+
+  const mapConfig = MAP_CONFIGS[mapName] ?? { baseT: 0.5, baseCT: 0.5 };
+  const sideBase = side === "CT" ? mapConfig.baseCT : mapConfig.baseT;
+  const structuralBias = side === "CT" ? 1.04 : 1;
+  const lateClockBias =
+    clockSeconds <= 24 ? (side === "CT" && !bombPlanted ? 1.11 : side === "T" ? 0.94 : 1) : 1;
+  const objectiveBias = bombPlanted ? (side === "T" ? 1.17 : 0.89) : 1;
+  const aliveRatio = alivePlayers.length / 5;
+
+  const power = alivePlayers.reduce((total, player) => {
+    const hpFactor = 0.34 + player.hp / 120;
+    const armorFactor = player.armor ? (player.helmet ? 1.12 : 1.06) : 0.94;
+    const utilityFactor = 0.94 + player.utilityCount * 0.05;
+    const ratingFactor = clamp((player.rating ?? 1) * 0.92, 0.64, 1.48);
+    const weaponFactor = weaponExpectancyWeight(player.weaponType);
+    return total + hpFactor * armorFactor * utilityFactor * ratingFactor * weaponFactor;
+  }, 0);
+
+  return power * (0.72 + aliveRatio * 0.72) * sideBase * structuralBias * lateClockBias * objectiveBias;
+}
+
+function estimateWinExpectancyFromSnapshot({
+  snapshot,
+  mapName,
+  sides,
+  clockLabel = "1:55",
+  bombPlanted = false,
+}) {
+  if (!snapshot?.teamA || !snapshot?.teamB) {
+    return {
+      teamA: 50,
+      teamB: 50,
+    };
+  }
+
+  const clockSeconds = clockLabelToSeconds(clockLabel);
+  const teamAScore = estimateTeamSnapshotScore(snapshot.teamA, sides.teamA, mapName, clockSeconds, bombPlanted);
+  const teamBScore = estimateTeamSnapshotScore(snapshot.teamB, sides.teamB, mapName, clockSeconds, bombPlanted);
+  const teamAWin = clamp(teamAScore / Math.max(0.01, teamAScore + teamBScore), 0.03, 0.97);
+
+  return {
+    teamA: roundMetric(teamAWin * 100, 0),
+    teamB: roundMetric((1 - teamAWin) * 100, 0),
+  };
+}
+
+function buildExpectancySeries(summary, mapName) {
+  if (!summary) {
+    return [];
+  }
+
+  const sides = summary.sides ?? { teamA: "CT", teamB: "T" };
+  const points = [];
+
+  if (summary.startLoadouts) {
+    const startExpectancy =
+      summary.preRoundExpectancy
+        ? {
+            teamA: roundMetric(summary.preRoundExpectancy.teamA * 100, 0),
+            teamB: roundMetric(summary.preRoundExpectancy.teamB * 100, 0),
+          }
+        : estimateWinExpectancyFromSnapshot({
+            snapshot: summary.startLoadouts,
+            mapName,
+            sides,
+            clockLabel: "1:55",
+            bombPlanted: false,
+          });
+
+    points.push({
+      id: `${summary.roundNumber}_start`,
+      label: "Freeze / buys locked",
+      clock: "1:55",
+      kind: "start",
+      teamA: startExpectancy.teamA,
+      teamB: startExpectancy.teamB,
+    });
+  }
+
+  let bombActive = false;
+  (summary.timeline ?? []).forEach((entry) => {
+    if (!entry.snapshot) {
+      return;
+    }
+
+    if (entry.bombPlanted) {
+      bombActive = true;
+    }
+
+    const expectancy = estimateWinExpectancyFromSnapshot({
+      snapshot: entry.snapshot,
+      mapName,
+      sides,
+      clockLabel: entry.clock,
+      bombPlanted: bombActive || entry.bombPlanted,
+    });
+
+    points.push({
+      id: entry.id,
+      label: entry.label,
+      clock: entry.clock,
+      kind: entry.kind,
+      teamA: expectancy.teamA,
+      teamB: expectancy.teamB,
+      openingKill: entry.openingKill,
+    });
+
+    if (entry.defuse || entry.bombExploded) {
+      bombActive = false;
+    }
+  });
+
+  return points;
+}
+
+function buildRoundSequence(rounds, pendingSummary = null) {
+  if (!pendingSummary) {
+    return rounds;
+  }
+
+  if (rounds.some((round) => round.roundNumber === pendingSummary.roundNumber)) {
+    return rounds;
+  }
+
+  return [...rounds, pendingSummary];
+}
+
+function buildPlayerFormLookup(rounds, pendingSummary = null) {
+  const lookup = {};
+  const relevantRounds = buildRoundSequence(rounds, pendingSummary).slice(-5);
+
+  relevantRounds.forEach((round) => {
+    ["teamA", "teamB"].forEach((teamKey) => {
+      (round.playerRoundStats?.[teamKey] ?? []).forEach((playerRound) => {
+        lookup[playerRound.id] ??= [];
+        lookup[playerRound.id].push(playerRound.formScore ?? 0);
+      });
+    });
+  });
+
+  Object.values(lookup).forEach((series) => {
+    while (series.length < 5) {
+      series.unshift(null);
+    }
+  });
+
+  return lookup;
+}
+
+function attachPlayerForm(players, lookup) {
+  return players.map((player) => ({
+    ...player,
+    formSeries: lookup[player.id] ?? [null, null, null, null, null],
+  }));
+}
+
+function averageForm(series = []) {
+  const values = series.filter((value) => value != null);
+  return values.length ? roundMetric(values.reduce((sumValue, value) => sumValue + value, 0) / values.length, 2) : 0;
+}
+
+function buildHeatmapClusters(map, sideFilter = "all") {
+  const markers = buildRadarMarkers(
+    map.rounds.flatMap((round) => round.timeline ?? []),
+    map.mapName
+  ).filter((marker) => sideFilter === "all" || marker.victimSide === sideFilter);
+
+  const grouped = {};
+  markers.forEach((marker) => {
+    const zoneKey = normalizeRadarLookupKey(marker.zone ?? marker.site ?? "unknown");
+    const key = `${marker.level}:${zoneKey}:${marker.victimSide ?? "UNK"}`;
+    grouped[key] ??= {
+      id: key,
+      level: marker.level,
+      side: marker.victimSide ?? "UNK",
+      zone: marker.zone ?? marker.site ?? "unknown",
+      x: 0,
+      y: 0,
+      count: 0,
+      labels: [],
+    };
+    grouped[key].x += marker.x;
+    grouped[key].y += marker.y;
+    grouped[key].count += 1;
+    grouped[key].labels.push(marker.label);
+  });
+
+  return Object.values(grouped)
+    .map((cluster) => ({
+      ...cluster,
+      x: cluster.x / Math.max(1, cluster.count),
+      y: cluster.y / Math.max(1, cluster.count),
+      title: `${cluster.zone} · ${cluster.count} kills`,
+    }))
+    .sort((left, right) => right.count - left.count);
+}
+
+function buildHighlightCards(results) {
+  const cards = [];
+
+  if (results.mvp) {
+    cards.push({
+      id: `mvp_${results.mvp.id}`,
+      weight: 9,
+      eyebrow: "Series MVP",
+      title: `${results.mvp.nickname} led the server`,
+      detail: `${results.mvp.teamTag} · ${results.mvp.kills} kills · ${results.mvp.rating} rating`,
+    });
+  }
+
+  results.maps.forEach((map) => {
+    map.rounds.forEach((round) => {
+      if (round.clutch) {
+        cards.push({
+          id: `${map.id}_clutch_${round.roundNumber}`,
+          weight: 8,
+          eyebrow: map.mapName,
+          title: `${round.clutch.nickname} closes a 1v${round.clutch.size}`,
+          detail: `Round ${round.displayRound} · ${round.winnerKey === "teamA" ? results.teamA.tag : results.teamB.tag} win the clutch round`,
+        });
+      }
+
+      const bestRoundPlayer = [...(round.playerRoundStats?.teamA ?? []), ...(round.playerRoundStats?.teamB ?? [])]
+        .sort((left, right) => right.kills - left.kills || right.damage - left.damage)[0];
+      if (bestRoundPlayer?.kills >= 3) {
+        cards.push({
+          id: `${map.id}_burst_${round.roundNumber}_${bestRoundPlayer.id}`,
+          weight: bestRoundPlayer.kills >= 4 ? 7 : 5,
+          eyebrow: map.mapName,
+          title: `${bestRoundPlayer.nickname} posts ${bestRoundPlayer.kills} in ${round.displayRound}`,
+          detail: `${bestRoundPlayer.damage} damage · ${round.strategy}`,
+        });
+      }
+
+      if (round.timeoutCalled) {
+        cards.push({
+          id: `${map.id}_timeout_${round.roundNumber}`,
+          weight: 4,
+          eyebrow: map.mapName,
+          title: `Tactical timeout before ${round.displayRound}`,
+          detail: `${round.timeoutCalled === "teamA" ? results.teamA.tag : results.teamB.tag} halt the slide and reset the callbook`,
+        });
+      }
+
+      if (["force", "eco"].includes(round.roundType?.[round.winnerKey])) {
+        cards.push({
+          id: `${map.id}_upset_${round.roundNumber}`,
+          weight: 6,
+          eyebrow: map.mapName,
+          title: `${round.winnerKey === "teamA" ? results.teamA.tag : results.teamB.tag} steal a ${round.roundType[round.winnerKey]} round`,
+          detail: `${round.displayRound} · ${reasonLabel(round.reason)}`,
+        });
+      }
+    });
+
+    const topMapPlayer = [...map.teamAPlayers, ...map.teamBPlayers].sort(
+      (left, right) => right.stats.rating - left.stats.rating
+    )[0];
+    if (topMapPlayer) {
+      cards.push({
+        id: `${map.id}_map_star_${topMapPlayer.id}`,
+        weight: 5,
+        eyebrow: map.mapName,
+        title: `${topMapPlayer.nickname} owned ${map.mapName}`,
+        detail: `${topMapPlayer.stats.kills} kills · ${topMapPlayer.stats.rating} rating`,
+      });
+    }
+  });
+
+  return cards
+    .sort((left, right) => right.weight - left.weight)
+    .filter((card, index, source) => source.findIndex((entry) => entry.title === card.title) === index)
+    .slice(0, 8);
+}
+
+function buildMapExpectancyCurve(map) {
+  return map.rounds.map((round) => ({
+    label: round.displayRound,
+    teamA: roundMetric((round.preRoundExpectancy?.teamA ?? 0.5) * 100, 0),
+    teamB: roundMetric((round.preRoundExpectancy?.teamB ?? 0.5) * 100, 0),
+    winner: round.winnerKey,
+  }));
+}
+
+function buildRoundSwing(roundSummary, mapName) {
+  const series = buildExpectancySeries(roundSummary, mapName);
+  if (!series.length) {
+    return null;
+  }
+
+  const values = series.map((point) => point.teamA);
+  const maxValue = Math.max(...values);
+  const minValue = Math.min(...values);
+  return {
+    roundNumber: roundSummary.roundNumber,
+    displayRound: roundSummary.displayRound,
+    mapName,
+    swing: roundMetric(maxValue - minValue, 0),
+    start: values[0],
+    finish: roundSummary.winnerKey === "teamA" ? 100 : 0,
+  };
+}
+
+function buildAnalystDesk(results) {
+  const rounds = results.maps.flatMap((map) =>
+    map.rounds
+      .map((roundSummary) => {
+        const swing = buildRoundSwing(roundSummary, map.mapName);
+        return swing ? { ...swing, summary: roundSummary } : null;
+      })
+      .filter(Boolean)
+  );
+
+  const biggestSwing = [...rounds].sort((left, right) => right.swing - left.swing)[0] ?? null;
+  const clutchLeader = [...results.players].sort(
+    (left, right) => right.clutchesWon - left.clutchesWon || right.rating - left.rating
+  )[0] ?? null;
+  const entryLeader = [...results.players].sort(
+    (left, right) => right.openingKills - left.openingKills || right.rating - left.rating
+  )[0] ?? null;
+
+  const pistols = results.maps.flatMap((map) =>
+    map.rounds.filter((round) => round.roundType?.teamA === "pistol" || round.roundType?.teamB === "pistol")
+  );
+  const pistolConversions = pistols.reduce(
+    (totals, pistolRound) => {
+      const map = results.maps.find((entry) => entry.mapName === pistolRound.mapName);
+      const followupRound = map?.rounds.find((round) => round.roundNumber === pistolRound.roundNumber + 1);
+      if (!followupRound) {
+        return totals;
+      }
+
+      totals.total += 1;
+      if (followupRound.winnerKey === pistolRound.winnerKey) {
+        totals.converted += 1;
+      }
+      return totals;
+    },
+    { converted: 0, total: 0 }
+  );
+
+  return {
+    biggestSwing,
+    clutchLeader,
+    entryLeader,
+    pistolConversions,
+  };
+}
+
+function formatRoundClock(totalSeconds) {
+  const safeSeconds = Math.max(0, totalSeconds);
+  return `${Math.floor(safeSeconds / 60)}:${String(safeSeconds % 60).padStart(2, "0")}`;
+}
+
+function clockLabelToSeconds(label) {
+  if (!label || typeof label !== "string") {
+    return 115;
+  }
+
+  const [minutes, seconds] = label.split(":").map((value) => Number.parseInt(value, 10));
+  if (Number.isNaN(minutes) || Number.isNaN(seconds)) {
+    return 115;
+  }
+
+  return minutes * 60 + seconds;
+}
+
+function useIsLandscape(enabled = true) {
+  const getValue = () => (typeof window !== "undefined" ? window.innerWidth > window.innerHeight : true);
+  const [isLandscape, setIsLandscape] = useState(getValue);
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") {
+      return undefined;
+    }
+
+    const syncOrientation = () => {
+      setIsLandscape(window.innerWidth > window.innerHeight);
+    };
+
+    syncOrientation();
+    window.addEventListener("resize", syncOrientation);
+    window.addEventListener("orientationchange", syncOrientation);
+
+    return () => {
+      window.removeEventListener("resize", syncOrientation);
+      window.removeEventListener("orientationchange", syncOrientation);
+    };
+  }, [enabled]);
+
+  return isLandscape;
+}
+
+function Panel({ title, subtitle, action, children, className = "", headerClassName = "" }) {
+  return (
+    <section className={classNames("panel page-enter rounded-2xl p-5", className)}>
+      {(title || subtitle || action) && (
+        <div className={classNames("mb-4 flex items-start justify-between gap-4", headerClassName)}>
+          <div>
+            {title && <h2 className="font-display text-2xl font-semibold tracking-wide text-text">{title}</h2>}
+            {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+          </div>
+          {action}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function TopNav({ activeView, onNavigate, siteMode, onSiteModeChange }) {
+  const { language, setLanguage, t } = useI18n();
+  const navLabels = {
+    home: t("nav_home"),
+    teams: t("nav_teams"),
+    "match-setup": t("nav_match_setup"),
+    live: t("nav_live"),
+    results: t("nav_results"),
+    history: t("nav_history"),
+    stats: t("nav_stats"),
+  };
+  return (
+    <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md">
+      <div className="mx-auto flex w-[min(1600px,98vw)] items-center justify-between gap-4 px-3 py-3 sm:px-4 sm:py-4">
+        <div>
+          <div className="font-display text-[10px] uppercase tracking-[0.3em] text-accent sm:text-xs sm:tracking-[0.35em]">{t("app_title")}</div>
+          <div className="font-display text-lg font-semibold text-text sm:text-2xl">{t("app_tagline")}</div>
+        </div>
+        <div className="flex min-w-0 items-center gap-3">
+          <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-card/70 p-1">
+            <span className="hidden px-2 text-xs uppercase tracking-[0.2em] text-muted sm:inline">{t("language")}</span>
+            {["en", "ru"].map((lang) => (
+              <button
+                key={lang}
+                type="button"
+                onClick={() => setLanguage(lang)}
+                className={classNames(
+                  "rounded-lg px-2.5 py-1 text-xs uppercase tracking-[0.18em] sm:px-3",
+                  language === lang ? "bg-accent/15 text-accent" : "text-muted"
+                )}
+              >
+                {lang}
+              </button>
+            ))}
+          </div>
+          <nav className="flex min-w-0 items-center gap-2 overflow-x-auto">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = activeView === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onNavigate(item.id)}
+                className={classNames(
+                  "flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm transition sm:px-4",
+                  active
+                    ? "border-accent bg-accent/10 text-accent shadow-glow"
+                    : "border-border bg-card/70 text-muted hover:border-accent/50 hover:text-text"
+                )}
+              >
+                <Icon size={16} />
+                <span className="hidden font-display text-lg md:inline">{navLabels[item.id] ?? item.label}</span>
+              </button>
+            );
+          })}
+          </nav>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function MobileHeader({ activeView, siteMode, onSiteModeChange, language, onLanguageChange }) {
+  const { t } = useI18n();
+  const currentNav = NAV_ITEMS.find((item) => item.id === activeView);
+
+  return (
+    <header className="sticky top-0 z-30 border-b border-border bg-surface/90 backdrop-blur-md">
+      <div className="flex items-center justify-between gap-3 px-3 py-3">
+        <div className="min-w-0">
+          <div className="font-display text-[10px] uppercase tracking-[0.28em] text-accent">{t("app_title")}</div>
+          <div className="truncate font-display text-xl text-text">{currentNav?.label ?? t("nav_home")}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
+          <div className="flex items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
+            {["en", "ru"].map((lang) => (
+              <button
+                key={lang}
+                type="button"
+                onClick={() => onLanguageChange(lang)}
+                className={classNames(
+                  "rounded-lg px-2 py-1 text-[11px] uppercase tracking-[0.14em]",
+                  language === lang ? "bg-accent/10 text-accent" : "text-muted"
+                )}
+              >
+                {lang}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function MobileBottomNav({ activeView, onNavigate }) {
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface/95 px-2 py-2 backdrop-blur-md">
+      <div className="grid grid-cols-6 gap-1">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const active = activeView === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onNavigate(item.id)}
+              className={classNames(
+                "flex flex-col items-center justify-center rounded-xl px-1 py-2 text-[10px]",
+                active ? "bg-accent/10 text-accent" : "text-muted"
+              )}
+            >
+              <Icon size={16} />
+              <span className="mt-1">{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function SiteModeModal({ onChoose }) {
+  const isMobileSuggested =
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 1024px)").matches : false;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="panel w-full max-w-2xl rounded-3xl p-6 sm:p-8">
+        <div className="text-xs uppercase tracking-[0.28em] text-accent">Version Select</div>
+        <h2 className="mt-3 font-display text-4xl text-text">Choose how the site should open</h2>
+        <p className="mt-3 text-sm text-muted">
+          Desktop keeps the full broadcast layout. Mobile switches the whole site to a phone-first shell with simplified navigation and a mobile live HUD.
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => onChoose("desktop")}
+            className="rounded-3xl border border-border bg-card/70 p-5 text-left transition hover:border-accent/35"
+          >
+            <div className="font-display text-3xl text-text">Desktop</div>
+            <div className="mt-2 text-sm text-muted">
+              Wide layout, full tables, broadcast HUD, best for PC and tablet landscape.
+            </div>
+            {isMobileSuggested ? null : (
+              <div className="mt-4 inline-flex rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs text-accent">
+                Recommended
+              </div>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onChoose("mobile")}
+            className="rounded-3xl border border-border bg-card/70 p-5 text-left transition hover:border-accent/35"
+          >
+            <div className="font-display text-3xl text-text">Mobile</div>
+            <div className="mt-2 text-sm text-muted">
+              Compact phone-first navigation, adapted content flow, and a dedicated mobile live screen.
+            </div>
+            {isMobileSuggested ? (
+              <div className="mt-4 inline-flex rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs text-accent">
+                Recommended
+              </div>
+            ) : null}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ icon: Icon, label, value, tone = "default" }) {
+  return (
+    <div
+      className={classNames(
+        "rounded-2xl border p-4",
+        tone === "accent"
+          ? "border-accent/40 bg-accent/8"
+          : tone === "danger"
+            ? "border-red-500/40 bg-red-500/10"
+            : "border-border bg-card/70"
+      )}
+    >
+      <div className="mb-2 flex items-center gap-2 text-muted">
+        <Icon size={16} />
+        <span className="text-xs uppercase tracking-[0.2em]">{label}</span>
+      </div>
+      <div className="font-display text-4xl font-semibold text-text">{value}</div>
+    </div>
+  );
+}
+
+function HomeView({ teams, history, mobile = false, onQuickStart, onOpenTeams, onOpenHistory }) {
+  const { t } = useI18n();
+  const topTeams = [...teams].sort((left, right) => getTeamStrength(right) - getTeamStrength(left)).slice(0, 3);
+  return (
+    <div className="space-y-6">
+      <Panel
+        title={t("dashboard")}
+        subtitle="Seeded teams, live match control, history replay, and full local export/import."
+        action={
+          <button
+            type="button"
+            onClick={onQuickStart}
+            className="flex items-center gap-2 rounded-xl border border-accent bg-accent/10 px-4 py-2 text-sm text-accent transition hover:bg-accent/15"
+          >
+            <Play size={16} />
+            {t("quick_start")}
+          </button>
+        }
+      >
+        <div className={classNames("grid gap-4", mobile ? "grid-cols-2" : "grid-cols-4")}>
+          <MetricCard icon={Users} label="Saved Teams" value={teams.length} tone="accent" />
+          <MetricCard icon={History} label="Stored Matches" value={history.length} />
+          <MetricCard icon={Trophy} label="Formats" value={MATCH_FORMATS.join(" / ")} />
+          <MetricCard icon={Sparkles} label="Map Pool" value={MAP_POOL.length} />
+        </div>
+      </Panel>
+      <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1.3fr_0.7fr]")}>
+        <Panel
+          title={t("top_teams")}
+          subtitle="Composite strength mixes player ratings with coach influence."
+          action={
+            <button type="button" onClick={onOpenTeams} className="text-sm text-accent hover:text-accent/80">
+              {t("open_team_manager_short")}
+            </button>
+          }
+        >
+          <div className="space-y-4">
+            {topTeams.map((team) => (
+              <div key={team.id} className="flex items-center justify-between rounded-2xl border border-border bg-card/60 p-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-surface">
+                    {renderLogo(team.logo)}
+                  </div>
+                  <div>
+                    <div className="font-display text-2xl font-semibold text-text">
+                      {team.name} <span className="text-sm text-muted">[{team.tag}]</span>
+                    </div>
+                    <div className="text-sm text-muted">
+                      {team.region} · Coach {team.coach.nickname} · Captain{" "}
+                      {team.players.find((player) => player.isCaptain)?.nickname}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="numbers text-2xl">{getTeamStrength(team)}</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-muted">Team Strength</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel
+          title={t("recent_results")}
+          subtitle="Replay any stored series from the history tab."
+          action={
+            <button type="button" onClick={onOpenHistory} className="text-sm text-accent hover:text-accent/80">
+              {t("open_history")}
+            </button>
+          }
+        >
+          <div className="space-y-3">
+            {history.length === 0 && <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">No saved matches yet.</div>}
+            {history.slice(0, 5).map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-border bg-card/60 p-4">
+                <div className="font-display text-xl text-text">{entry.teams}</div>
+                <div className="mt-1 flex items-center justify-between text-sm text-muted">
+                  <span>{new Date(entry.date).toLocaleString()}</span>
+                  <span className="numbers">{entry.score}</span>
+                </div>
+                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-muted">
+                  MVP {entry.mvp} · {entry.mapsPlayed}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function SideRail({ selectedTeam, currentMatch, lastSavedAt, onExport, onImport }) {
+  const { t } = useI18n();
+  return (
+    <div className="space-y-6">
+      <Panel title="Control Rail" subtitle="Fast access to save, export, import, and current live status.">
+        <div className="space-y-3">
+          <button type="button" onClick={onExport} className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card/70 px-4 py-3 text-sm text-text hover:border-accent/40">
+            <Download size={16} />
+            {t("export_all_data")}
+          </button>
+          <button type="button" onClick={onImport} className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card/70 px-4 py-3 text-sm text-text hover:border-accent/40">
+            <Upload size={16} />
+            {t("import_data")}
+          </button>
+          <div className="rounded-xl border border-border bg-surface/80 p-4 text-sm text-muted">
+            <div className="mb-1 uppercase tracking-[0.2em] text-xs">Autosave</div>
+            <div>{lastSavedAt ? new Date(lastSavedAt).toLocaleString() : t("not_saved")}</div>
+          </div>
+        </div>
+      </Panel>
+      {selectedTeam && (
+        <Panel title="Selected Team" subtitle="Live quick glance for the active roster.">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-surface">{renderLogo(selectedTeam.logo)}</div>
+            <div>
+              <div className="font-display text-2xl text-text">{selectedTeam.name}</div>
+              <div className="text-sm text-muted">
+                {selectedTeam.region} · {selectedTeam.players.length} players
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 space-y-3">
+            {selectedTeam.players.map((player) => (
+              <div key={player.id} className="rounded-xl border border-border bg-card/60 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-display text-lg text-text">{player.nickname}</div>
+                  <div className="numbers text-sm">{compositeRating(player)}</div>
+                </div>
+                <div className="text-xs uppercase tracking-[0.2em] text-muted">{player.role}</div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+      {currentMatch && (
+        <Panel title="Live Status" subtitle="Series state follows the current match snapshot.">
+          <div className="space-y-3 text-sm text-muted">
+            <div className="flex items-center justify-between">
+              <span>Status</span>
+              <span className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-accent">
+                {currentMatch.status}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Format</span>
+              <span className="numbers text-text">{currentMatch.format}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Series Score</span>
+              <span className="numbers text-text">
+                {currentMatch.seriesScore.teamA}-{currentMatch.seriesScore.teamB}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Timeouts</span>
+              <span className="numbers text-text">
+                {currentMatch.timeoutsRemaining.teamA} / {currentMatch.timeoutsRemaining.teamB}
+              </span>
+            </div>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function ToastStack({ toasts, onDismiss }) {
+  return (
+    <div className="fixed right-4 top-20 z-50 flex w-[360px] flex-col gap-3">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={classNames(
+            "glass animate-float-in rounded-2xl border px-4 py-3 shadow-glow",
+            toast.tone === "error" ? "border-red-500/40" : "border-accent/30"
+          )}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {toast.tone === "error" ? <AlertTriangle size={18} className="text-red-400" /> : <Check size={18} className="text-accent" />}
+              <span className="text-sm text-text">{toast.message}</span>
+            </div>
+            <button type="button" onClick={() => onDismiss(toast.id)} className="text-muted hover:text-text">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ConfirmModal({ title, message, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="panel w-full max-w-md rounded-2xl p-6">
+        <div className="flex items-center gap-3 text-accent">
+          <AlertTriangle size={20} />
+          <h3 className="font-display text-2xl text-text">{title}</h3>
+        </div>
+        <p className="mt-3 text-sm text-muted">{message}</p>
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-text">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportModal({ onMerge, onReplace, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="panel w-full max-w-lg rounded-2xl p-6">
+        <div className="flex items-center gap-3 text-accent">
+          <FileUp size={20} />
+          <h3 className="font-display text-2xl text-text">Import Data</h3>
+        </div>
+        <p className="mt-3 text-sm text-muted">
+          Choose whether the imported JSON should merge into the current workspace or replace it entirely.
+        </p>
+        <div className="mt-6 grid grid-cols-2 gap-4">
+          <button type="button" onClick={onMerge} className="rounded-2xl border border-accent/40 bg-accent/10 p-4 text-left">
+            <div className="font-display text-xl text-text">Merge</div>
+            <div className="mt-1 text-sm text-muted">Keep current data and overlay imported teams/history.</div>
+          </button>
+          <button type="button" onClick={onReplace} className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-left">
+            <div className="font-display text-xl text-text">Replace</div>
+            <div className="mt-1 text-sm text-muted">Swap the entire local workspace with the imported file.</div>
+          </button>
+        </div>
+        <div className="mt-6 flex justify-end">
+          <button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-text">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RatingBar({ value }) {
+  const tone = getCompositeColor(value);
+  const colorClass =
+    tone === "green"
+      ? "bg-emerald-400"
+      : tone === "yellow"
+        ? "bg-amber-400"
+        : "bg-red-400";
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="uppercase tracking-[0.2em] text-muted">Composite Rating</span>
+        <span className="numbers">{value}</span>
+      </div>
+      <div className="stat-track h-2 overflow-hidden rounded-full">
+        <div className={classNames("h-full rounded-full", colorClass)} style={{ width: `${value}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function StatSlider({ label, value, onChange }) {
+  return (
+    <label className="block">
+      <div className="mb-1 flex items-center justify-between text-sm">
+        <span className="text-muted">{label}</span>
+        <span className="numbers">{value}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={value}
+          onChange={(event) => onChange(clamp(Number(event.target.value), 0, 100))}
+          className="h-2 flex-1 cursor-pointer accent-[#f5a623]"
+        />
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={value}
+          onChange={(event) => onChange(clamp(Number(event.target.value || 0), 0, 100))}
+          className="numbers w-16 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+        />
+      </div>
+    </label>
+  );
+}
+
+function MapPreferenceEditor({ title, maps, onChange }) {
+  const available = MAP_POOL.filter((map) => !maps.includes(map));
+
+  const move = (index, direction) => {
+    const next = [...maps];
+    const target = index + direction;
+    if (target < 0 || target >= next.length) {
+      return;
+    }
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-card/60 p-4">
+      <div className="mb-3 font-display text-xl text-text">{title}</div>
+      <div className="space-y-2">
+        {maps.map((map, index) => (
+          <div key={map} className="flex items-center justify-between rounded-xl border border-border bg-surface/70 px-3 py-2">
+            <div className="flex items-center gap-3">
+              <span className="numbers text-sm text-accent">{index + 1}</span>
+              <span className="font-display text-lg text-text">{map}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => move(index, -1)} className="rounded-lg border border-border p-1 text-muted hover:text-text">
+                <ChevronUp size={16} />
+              </button>
+              <button type="button" onClick={() => move(index, 1)} className="rounded-lg border border-border p-1 text-muted hover:text-text">
+                <ChevronDown size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange(maps.filter((value) => value !== map))}
+                className="rounded-lg border border-border p-1 text-muted hover:text-red-300"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {available.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {available.map((map) => (
+            <button
+              key={map}
+              type="button"
+              onClick={() => onChange([...maps, map])}
+              className="rounded-full border border-border px-3 py-1 text-sm text-muted hover:border-accent/40 hover:text-text"
+            >
+              + {map}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlayerEditorCard({ player, players, onChange, onRemove, onSetCaptain }) {
+  const totalRating = compositeRating(player);
+  return (
+    <div className="rounded-2xl border border-border bg-card/70 p-4">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <div className="font-display text-2xl text-text">{player.nickname || "New Player"}</div>
+          <div className="text-sm text-muted">{player.role}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted">
+            <input
+              type="radio"
+              name="captain"
+              checked={player.isCaptain}
+              onChange={() => onSetCaptain(player.id)}
+            />
+            Captain
+          </label>
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={players.length <= 1}
+            className="rounded-lg border border-border p-2 text-muted hover:text-red-300 disabled:opacity-40"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="text-sm text-muted">
+          Real Name
+          <input
+            type="text"
+            value={player.name}
+            onChange={(event) => onChange({ ...player, name: event.target.value })}
+            className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+          />
+        </label>
+        <label className="text-sm text-muted">
+          Nickname
+          <input
+            type="text"
+            value={player.nickname}
+            onChange={(event) => onChange({ ...player, nickname: event.target.value })}
+            className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+          />
+        </label>
+        <label className="text-sm text-muted">
+          Role
+          <select
+            value={player.role}
+            onChange={(event) => onChange({ ...player, role: event.target.value })}
+            className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+          >
+            {ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm text-muted">
+          Nationality
+          <input
+            type="text"
+            value={player.nationality}
+            onChange={(event) => onChange({ ...player, nationality: event.target.value })}
+            className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+          />
+        </label>
+        <label className="text-sm text-muted">
+          Age
+          <input
+            type="number"
+            min="16"
+            max="45"
+            value={player.age}
+            onChange={(event) => onChange({ ...player, age: clamp(Number(event.target.value || 16), 16, 45) })}
+            className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+          />
+        </label>
+      </div>
+      <div className="mt-4">
+        <RatingBar value={totalRating} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-4">
+        <StatSlider label="Aim" value={player.aim} onChange={(value) => onChange({ ...player, aim: value })} />
+        <StatSlider label="Game Sense" value={player.gameSense} onChange={(value) => onChange({ ...player, gameSense: value })} />
+        <StatSlider label="Clutch" value={player.clutch} onChange={(value) => onChange({ ...player, clutch: value })} />
+        <StatSlider label="Utility" value={player.utility} onChange={(value) => onChange({ ...player, utility: value })} />
+        <StatSlider label="Entry Fragging" value={player.entry} onChange={(value) => onChange({ ...player, entry: value })} />
+        <StatSlider label="Consistency" value={player.consistency} onChange={(value) => onChange({ ...player, consistency: value })} />
+      </div>
+    </div>
+  );
+}
+
+function TeamsView({
+  teams,
+  mobile = false,
+  selectedTeamId,
+  teamDraft,
+  isNewTeam,
+  onSelectTeam,
+  onDraftChange,
+  onNewTeam,
+  onSaveTeam,
+  onDeleteTeam,
+  onExport,
+  onImport,
+}) {
+  const { t } = useI18n();
+  const logoInputRef = useRef(null);
+  const rosterWarning = teamDraft.players.length !== 5 ? "Teams must have exactly 5 players to enter match setup." : null;
+
+  const updateDraft = (updater) => {
+    onDraftChange((current) => (typeof updater === "function" ? updater(current) : updater));
+  };
+
+  const setCaptain = (captainId) => {
+    updateDraft((current) => ({
+      ...current,
+      captainId,
+      players: ensureExactlyOneCaptain(current.players, captainId),
+    }));
+  };
+
+  const onLogoFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    updateDraft((current) => ({ ...current, logo: String(dataUrl) }));
+    event.target.value = "";
+  };
+
+  return (
+    <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[320px_1fr]")}>
+      <Panel
+        title={t("team_manager")}
+        subtitle="Create, edit, and tune rosters, coaches, captains, and map pools."
+        className="h-fit"
+        action={
+          <button
+            type="button"
+            onClick={onNewTeam}
+            className="flex items-center gap-2 rounded-xl border border-accent bg-accent/10 px-3 py-2 text-sm text-accent"
+          >
+            <Plus size={16} />
+            {t("new_team")}
+          </button>
+        }
+      >
+        <div className="mb-4 flex gap-2">
+          <button type="button" onClick={onExport} className="flex-1 rounded-xl border border-border bg-card/70 px-3 py-2 text-sm text-text hover:border-accent/40">
+            Export
+          </button>
+          <button type="button" onClick={onImport} className="flex-1 rounded-xl border border-border bg-card/70 px-3 py-2 text-sm text-text hover:border-accent/40">
+            Import
+          </button>
+        </div>
+        <div className="space-y-3">
+          {teams.map((team) => (
+            <button
+              key={team.id}
+              type="button"
+              onClick={() => onSelectTeam(team.id)}
+              className={classNames(
+                "w-full rounded-2xl border p-4 text-left transition",
+                selectedTeamId === team.id
+                  ? "border-accent bg-accent/10"
+                  : "border-border bg-card/60 hover:border-accent/30"
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-surface">
+                  {renderLogo(team.logo)}
+                </div>
+                <div>
+                  <div className="font-display text-2xl text-text">
+                    {team.name} <span className="text-sm text-muted">[{team.tag}]</span>
+                  </div>
+                  <div className="text-sm text-muted">
+                    {team.region} · Strength {getTeamStrength(team)}
+                  </div>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </Panel>
+      <div className="space-y-6">
+        <Panel
+          title={isNewTeam ? "New Team" : "Team Detail"}
+          subtitle="Every change updates the full simulation profile: economy tendencies, vetoes, and map performance."
+          action={
+            <div className="flex gap-2">
+              <button type="button" onClick={onSaveTeam} className="flex items-center gap-2 rounded-xl border border-accent bg-accent/10 px-4 py-2 text-sm text-accent">
+                <Save size={16} />
+                {t("save_team")}
+              </button>
+              {!isNewTeam && (
+                <button type="button" onClick={onDeleteTeam} className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+                  <Trash2 size={16} />
+                  {t("delete_team")}
+                </button>
+              )}
+            </div>
+          }
+        >
+          <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1fr_320px]")}>
+            <div className="space-y-5">
+              <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-2")}>
+                <label className="text-sm text-muted">
+                  Team Name
+                  <input
+                    type="text"
+                    value={teamDraft.name}
+                    onChange={(event) => updateDraft((current) => ({ ...current, name: event.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+                  />
+                </label>
+                <label className="text-sm text-muted">
+                  Tag
+                  <input
+                    type="text"
+                    maxLength="5"
+                    value={teamDraft.tag}
+                    onChange={(event) => updateDraft((current) => ({ ...current, tag: event.target.value.toUpperCase().slice(0, 5) }))}
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+                  />
+                </label>
+                <label className="text-sm text-muted">
+                  Region
+                  <select
+                    value={teamDraft.region}
+                    onChange={(event) => updateDraft((current) => ({ ...current, region: event.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+                  >
+                    {REGIONS.map((region) => (
+                      <option key={region} value={region}>
+                        {region}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm text-muted">
+                    Logo / Emoji / Image URL / PNG
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        type="text"
+                        value={teamDraft.logo}
+                        onChange={(event) => updateDraft((current) => ({ ...current, logo: event.target.value }))}
+                        className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+                      />
+                      <button type="button" onClick={() => logoInputRef.current?.click()} className="rounded-xl border border-border px-3 py-2 text-sm text-text">
+                        Upload PNG
+                      </button>
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        className="hidden"
+                        onChange={onLogoFile}
+                      />
+                    </div>
+                    <span className="mt-2 block text-xs text-muted">
+                      PNG, JPG, SVG, and WebP logos are converted to a local data URL and saved in browser storage.
+                    </span>
+                </label>
+              </div>
+              <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-2")}>
+                <label className="text-sm text-muted">
+                  Coach Name
+                  <input
+                    type="text"
+                    value={teamDraft.coach.name}
+                    onChange={(event) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        coach: { ...current.coach, name: event.target.value },
+                      }))
+                    }
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+                  />
+                </label>
+                <label className="text-sm text-muted">
+                  Coach Nickname
+                  <input
+                    type="text"
+                    value={teamDraft.coach.nickname}
+                    onChange={(event) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        coach: { ...current.coach, nickname: event.target.value },
+                      }))
+                    }
+                    className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+                  />
+                </label>
+              </div>
+              <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-3")}>
+                <StatSlider
+                  label="Tactical Rating"
+                  value={teamDraft.coach.tacticalRating}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      coach: { ...current.coach, tacticalRating: value },
+                    }))
+                  }
+                />
+                <StatSlider
+                  label="Motivation Rating"
+                  value={teamDraft.coach.motivationRating}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      coach: { ...current.coach, motivationRating: value },
+                    }))
+                  }
+                />
+                <StatSlider
+                  label="Map Knowledge"
+                  value={teamDraft.coach.mapKnowledge}
+                  onChange={(value) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      coach: { ...current.coach, mapKnowledge: value },
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card/60 p-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-border bg-surface">
+                {renderLogo(teamDraft.logo)}
+              </div>
+              <div className="mt-4 font-display text-3xl text-text">
+                {teamDraft.name || "Unnamed Team"}
+              </div>
+              <div className="mt-1 text-sm text-muted">
+                {teamDraft.region} · {teamDraft.tag}
+              </div>
+              <div className="mt-4 space-y-4">
+                <RatingBar
+                  value={Math.round(
+                    teamDraft.players.length
+                      ? teamDraft.players.reduce((sum, player) => sum + compositeRating(player), 0) /
+                          teamDraft.players.length
+                      : 0
+                  )}
+                />
+                <div className="rounded-xl border border-border bg-surface/80 p-4">
+                  <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">Derived Bans</div>
+                  <div className="flex flex-wrap gap-2">
+                    {deriveBannedMaps(teamDraft).length === 0 && <span className="text-sm text-muted">None</span>}
+                    {deriveBannedMaps(teamDraft).map((map) => (
+                      <span key={map} className="rounded-full border border-border px-3 py-1 text-sm text-muted">
+                        {map}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {rosterWarning && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                    {rosterWarning}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </Panel>
+        <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-2")}>
+          <MapPreferenceEditor
+            title="Captain / Team Preferred Maps"
+            maps={teamDraft.preferredMaps}
+            onChange={(maps) => updateDraft((current) => ({ ...current, preferredMaps: maps }))}
+          />
+          <MapPreferenceEditor
+            title="Coach Preferred Maps"
+            maps={teamDraft.coach.preferredMaps}
+            onChange={(maps) =>
+              updateDraft((current) => ({
+                ...current,
+                coach: { ...current.coach, preferredMaps: maps },
+              }))
+            }
+          />
+        </div>
+        <Panel
+          title="Roster"
+          subtitle="Exactly five players are required for match simulation."
+          action={
+            <button
+              type="button"
+              disabled={teamDraft.players.length >= 5}
+              onClick={() =>
+                updateDraft((current) => ({
+                  ...current,
+                  players: [...current.players, createBlankPlayer(current.players.length + 1)],
+                }))
+              }
+              className="flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm text-text disabled:opacity-40"
+            >
+              <Plus size={16} />
+              Add Player
+            </button>
+          }
+        >
+          <div className="space-y-4">
+            {teamDraft.players.map((player) => (
+              <PlayerEditorCard
+                key={player.id}
+                player={player}
+                players={teamDraft.players}
+                onSetCaptain={setCaptain}
+                onRemove={() =>
+                  updateDraft((current) => ({
+                    ...current,
+                    players: current.players.filter((candidate) => candidate.id !== player.id),
+                  }))
+                }
+                onChange={(nextPlayer) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    players: current.players.map((candidate) =>
+                      candidate.id === player.id ? nextPlayer : candidate
+                    ),
+                  }))
+                }
+              />
+            ))}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function TeamSetupPreview({ team }) {
+  if (!team) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted">
+        Select a team.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-card/70 p-5">
+      <div className="flex items-center gap-4">
+        <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-surface">
+          {renderLogo(team.logo)}
+        </div>
+        <div>
+          <div className="font-display text-3xl text-text">
+            {team.name} <span className="text-sm text-muted">[{team.tag}]</span>
+          </div>
+          <div className="text-sm text-muted">
+            {team.region} · Coach {team.coach.nickname} · Strength {getTeamStrength(team)}
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {team.preferredMaps.slice(0, 4).map((map, index) => (
+          <span key={map} className="rounded-full border border-border px-3 py-1 text-sm text-muted">
+            #{index + 1} {map}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVeto, canStartMatch }) {
+  const { t } = useI18n();
+  const teamA = teams.find((team) => team.id === setup.teamAId);
+  const teamB = teams.find((team) => team.id === setup.teamBId);
+
+  return (
+    <div className="space-y-6">
+      <Panel
+        title={t("match_setup")}
+        subtitle="Pick the teams, format, and speed. Veto starts from this screen."
+        action={
+          <button
+            type="button"
+            onClick={onStartVeto}
+            disabled={!canStartMatch}
+            className="flex items-center gap-2 rounded-xl border border-accent bg-accent/10 px-4 py-2 text-sm text-accent disabled:opacity-40"
+          >
+            <Play size={16} />
+            {t("start_veto")}
+          </button>
+        }
+      >
+        <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-2")}>
+          <div className="space-y-4">
+            <label className="block text-sm text-muted">
+              Team A
+              <select
+                value={setup.teamAId}
+                onChange={(event) => onSetupChange((current) => ({ ...current, teamAId: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+              >
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <TeamSetupPreview team={teamA} />
+          </div>
+          <div className="space-y-4">
+            <label className="block text-sm text-muted">
+              Team B
+              <select
+                value={setup.teamBId}
+                onChange={(event) => onSetupChange((current) => ({ ...current, teamBId: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+              >
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <TeamSetupPreview team={teamB} />
+          </div>
+        </div>
+      </Panel>
+      <Panel title="Tournament Context" subtitle="These fields are saved with the match and drive archive and stats filters.">
+        <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-2")}>
+          <label className="block text-sm text-muted">
+            Tournament
+            <input
+              type="text"
+              value={setup.tournamentName}
+              onChange={(event) => onSetupChange((current) => ({ ...current, tournamentName: event.target.value }))}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+            />
+          </label>
+          <label className="block text-sm text-muted">
+            Stage
+            <select
+              value={setup.stage}
+              onChange={(event) => onSetupChange((current) => ({ ...current, stage: event.target.value }))}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+            >
+              {TOURNAMENT_STAGES.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stage}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm text-muted">
+            Event Type
+            <div className="mt-1 flex gap-2">
+              {EVENT_TYPES.map((eventType) => (
+                <button
+                  key={eventType}
+                  type="button"
+                  onClick={() => onSetupChange((current) => ({ ...current, eventType }))}
+                  className={classNames(
+                    "rounded-xl border px-4 py-2 text-sm",
+                    setup.eventType === eventType
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-border bg-card/70 text-muted"
+                  )}
+                >
+                  {eventType}
+                </button>
+              ))}
+            </div>
+          </label>
+          <label className="block text-sm text-muted">
+            Match Date
+            <input
+              type="date"
+              value={setup.matchDate}
+              onChange={(event) => onSetupChange((current) => ({ ...current, matchDate: event.target.value }))}
+              className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
+            />
+          </label>
+        </div>
+      </Panel>
+      <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1fr_360px]")}>
+        <Panel title={t("series_rules")} subtitle="Current sim settings match the full MR12 spec, with OT and economy enabled.">
+          <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-3")}>
+            <div>
+              <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">Format</div>
+              <div className="flex gap-2">
+                {MATCH_FORMATS.map((format) => (
+                  <button
+                    key={format}
+                    type="button"
+                    onClick={() => onSetupChange((current) => ({ ...current, format }))}
+                    className={classNames(
+                      "rounded-xl border px-4 py-2 text-sm",
+                      setup.format === format
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-border bg-card/70 text-muted"
+                    )}
+                  >
+                    {format}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">Simulation Speed</div>
+              <div className="flex gap-2">
+                {SPEED_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => onSetupChange((current) => ({ ...current, speed: option.id }))}
+                    className={classNames(
+                      "rounded-xl border px-4 py-2 text-sm",
+                      setup.speed === option.id
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-border bg-card/70 text-muted"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-3 rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+              <input
+                type="checkbox"
+                checked={setup.showDetailedLogs}
+                onChange={(event) =>
+                  onSetupChange((current) => ({
+                    ...current,
+                    showDetailedLogs: event.target.checked,
+                  }))
+                }
+              />
+              Show detailed logs
+            </label>
+          </div>
+          <div className={classNames("mt-6 grid gap-4", mobile ? "grid-cols-2" : "grid-cols-3")}>
+            {MAP_POOL.map((map) => (
+              <div key={map} className="rounded-2xl border border-border bg-card/60 p-4">
+                <div className="font-display text-2xl text-text">{map}</div>
+                <div className="mt-1 text-sm text-muted">
+                  T {Math.round(MAP_CONFIGS[map].baseT * 100)}% · CT {Math.round(MAP_CONFIGS[map].baseCT * 100)}%
+                </div>
+                <div className="mt-2 text-xs uppercase tracking-[0.16em] text-muted">
+                  {MAP_CONFIGS[map].traits[0]}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title={t("checklist")} subtitle="The series is ready when both teams have legal five-player rosters.">
+          <div className="space-y-3 text-sm">
+            <ChecklistRow label="Different teams selected" passed={setup.teamAId !== setup.teamBId} />
+            <ChecklistRow label="Team A has 5 players" passed={teamA?.players.length === 5} />
+            <ChecklistRow label="Team B has 5 players" passed={teamB?.players.length === 5} />
+            <ChecklistRow label="Captains assigned" passed={Boolean(teamA?.players.some((player) => player.isCaptain) && teamB?.players.some((player) => player.isCaptain))} />
+            <ChecklistRow label="Coach profiles present" passed={Boolean(teamA?.coach.nickname && teamB?.coach.nickname)} />
+          </div>
+          {!canStartMatch && (
+            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+              Fix roster or team selection issues before starting veto.
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function ChecklistRow({ label, passed }) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-border bg-card/60 px-3 py-2">
+      <span className="text-muted">{label}</span>
+      <span className={classNames("rounded-full px-3 py-1 text-xs uppercase tracking-[0.18em]", passed ? "bg-emerald-400/10 text-emerald-300" : "bg-red-500/10 text-red-300")}>
+        {passed ? "Ready" : "Needs work"}
+      </span>
+    </div>
+  );
+}
+
+function VetoView({ match, revealedCount, mobile = false }) {
+  const { t } = useI18n();
+  const revealed = match.veto.steps.slice(0, revealedCount);
+  return (
+    <div className="space-y-6">
+      <Panel title={t("veto_screen")} subtitle="Cards reveal in sequence with weighted bans, picks, and the decider map.">
+        <div className={classNames("mb-5 rounded-2xl border border-border bg-card/70 p-5", mobile ? "space-y-4" : "flex items-center justify-between")}>
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-surface">{renderLogo(match.teamA.logo)}</div>
+            <div>
+              <div className="font-display text-3xl text-text">{match.teamA.name}</div>
+              <div className="text-sm text-muted">{match.teamA.tag}</div>
+            </div>
+          </div>
+          <div className={classNames("font-display text-4xl text-accent", mobile && "text-center")}>VETO</div>
+          <div className={classNames("flex items-center gap-4", mobile && "justify-end")}>
+            <div className="text-right">
+              <div className="font-display text-3xl text-text">{match.teamB.name}</div>
+              <div className="text-sm text-muted">{match.teamB.tag}</div>
+            </div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-surface">{renderLogo(match.teamB.logo)}</div>
+          </div>
+        </div>
+        <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-3")}>
+          {revealed.map((step) => (
+            <div
+              key={step.id}
+              className={classNames(
+                "animate-float-in rounded-2xl border p-4",
+                step.action === "ban"
+                  ? "border-red-500/30 bg-red-500/10"
+                  : step.action === "pick"
+                    ? "border-accent/40 bg-accent/10"
+                    : "border-sky-500/30 bg-sky-500/10"
+              )}
+            >
+              <div className="text-xs uppercase tracking-[0.22em] text-muted">
+                {step.action === "ban" ? "Ban" : step.action === "pick" ? "Pick" : "Decider"}
+              </div>
+              <div className="mt-2 font-display text-3xl text-text">{step.map}</div>
+              <div className="mt-1 text-sm text-muted">
+                {step.teamName} {step.action === "decider" ? "leaves it for the server" : step.action === "ban" ? "remove it" : "lock it in"}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+      <Panel title={t("series_order")} subtitle="Starting sides come from the weighted knife round / side-choice model.">
+        <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-3")}>
+          {match.maps.map((map) => (
+            <div key={map.id} className="rounded-2xl border border-border bg-card/70 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-muted">
+                Map {map.order} · {map.isDecider ? "Decider" : map.pickedBy === "teamA" ? match.teamA.tag : match.teamB.tag}
+              </div>
+              <div className="mt-2 font-display text-3xl text-text">{map.mapName}</div>
+              <div className="mt-2 text-sm text-muted">
+                Knife: {(map.knifeWinner === "teamA" ? match.teamA : match.teamB).tag} · Start sides {map.startSides.teamA}/{map.startSides.teamB}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function liveRowsFromTeam(teamState) {
+  return teamState.players.map((player) => ({
+    id: player.id,
+    nickname: player.nickname,
+    role: player.role,
+    weaponLabel: player.roundLoadout.weaponLabel,
+    weaponType: player.roundLoadout.weaponType,
+    armor: player.roundLoadout.armor,
+    helmet: player.roundLoadout.helmet,
+    utilityCount: player.roundLoadout.utilityItems.length,
+    hp: player.hp,
+    alive: player.alive,
+    kills: player.stats.kills,
+    deaths: player.stats.deaths,
+    assists: player.stats.assists,
+    rating: player.stats.rating,
+    money: player.money,
+  }));
+}
+
+function reasonLabel(reason) {
+  if (reason === "bomb exploded") {
+    return "Bomb Exploded";
+  }
+
+  if (reason === "defuse") {
+    return "Defuse";
+  }
+
+  if (reason === "time") {
+    return "Time";
+  }
+
+  return "Elimination";
+}
+
+function LiveMatchView({
+  match,
+  roundProgress,
+  mobileSite = false,
+  layoutMode = "broadcast",
+  onLayoutModeChange,
+  presentationMode = "semi",
+  onPresentationModeChange,
+  playbackRate = 1.25,
+  onPlaybackRateChange,
+  soundDesignEnabled = false,
+  onSoundDesignChange,
+  roundPlayback = null,
+  fullscreen = false,
+  siteMode = "desktop",
+  onSiteModeChange,
+}) {
+  const { t } = useI18n();
+  const [radarExpanded, setRadarExpanded] = useState(false);
+  if (!isRenderableMatch(match)) {
+    return (
+      <Panel title={t("live_match")} className="p-4">
+        <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-border px-6 text-center text-sm text-muted">
+          Live session data is unavailable right now. Return to match setup or reload the page to recover the stream.
+        </div>
+      </Panel>
+    );
+  }
+  const activeMap = match.maps[match.currentMapIndex] ?? match.maps[match.maps.length - 1];
+  const playbackSummary = roundPlayback?.summary ?? null;
+  const playbackTotalFrames = roundPlayback?.totalFrames ?? playbackSummary?.timeline?.length ?? 0;
+  const playbackFrame =
+    playbackSummary && roundPlayback.frameIndex >= 0
+      ? playbackSummary.timeline?.[Math.min(roundPlayback.frameIndex, (playbackSummary.timeline?.length ?? 1) - 1)] ?? null
+      : null;
+  const playbackSnapshot = playbackFrame?.snapshot ?? playbackSummary?.startLoadouts ?? null;
+  const latestRound = playbackSummary ?? activeMap.lastRoundSummary;
+  const rawTeamAPlayers = playbackSnapshot?.teamA ?? latestRound?.loadouts.teamA ?? liveRowsFromTeam(activeMap.teamAState);
+  const rawTeamBPlayers = playbackSnapshot?.teamB ?? latestRound?.loadouts.teamB ?? liveRowsFromTeam(activeMap.teamBState);
+  const teamAState = activeMap.teamAState;
+  const teamBState = activeMap.teamBState;
+  const roundClock =
+    playbackSummary
+      ? clockLabelToSeconds(playbackFrame?.clock ?? "1:55")
+      : Math.max(0, Math.round(115 * (1 - roundProgress)));
+  const roundClockLabel = playbackSummary ? playbackFrame?.clock ?? "1:55" : formatRoundClock(roundClock);
+  const economyData = activeMap.economyHistory.map((entry) => ({
+    ...entry,
+    label: entry.label,
+  }));
+  const roundTimelineEvents = playbackSummary
+    ? (playbackSummary.timeline ?? []).slice(0, Math.max(0, roundPlayback.frameIndex + 1))
+    : latestRound?.timeline ?? [];
+  const radarMarkers = buildRadarMarkers(roundTimelineEvents, activeMap.mapName);
+  const latestRadarMarker = radarMarkers[radarMarkers.length - 1] ?? null;
+  const playerFormLookup = useMemo(
+    () => buildPlayerFormLookup(activeMap.rounds, playbackSummary),
+    [activeMap.rounds, playbackSummary]
+  );
+  const teamAPlayers = useMemo(
+    () => attachPlayerForm(rawTeamAPlayers, playerFormLookup),
+    [rawTeamAPlayers, playerFormLookup]
+  );
+  const teamBPlayers = useMemo(
+    () => attachPlayerForm(rawTeamBPlayers, playerFormLookup),
+    [rawTeamBPlayers, playerFormLookup]
+  );
+  const expectancySeries = useMemo(
+    () => buildExpectancySeries(playbackSummary ?? latestRound, activeMap.mapName),
+    [playbackSummary, latestRound, activeMap.mapName]
+  );
+  const currentExpectancyPoint =
+    expectancySeries[
+      playbackSummary
+        ? Math.max(0, Math.min(expectancySeries.length - 1, roundPlayback.frameIndex + 1))
+        : expectancySeries.length - 1
+    ] ?? expectancySeries[expectancySeries.length - 1] ?? null;
+  const killFeedEntries = roundTimelineEvents
+    .filter((entry) => entry.kind === "kill")
+    .map((entry) => ({
+      ...entry,
+      weaponLabel: entry.weaponLabel ?? "UTIL",
+      zoneLabel: resolveRadarZoneLabel(activeMap.mapName, entry.zone, entry.site),
+    }))
+    .reverse();
+  const feedEntries = playbackSummary
+    ? (playbackSummary.timeline ?? [])
+        .slice(0, Math.max(0, roundPlayback.frameIndex + 1))
+        .map((entry) => ({
+          ...entry,
+          roundNumber: playbackSummary.roundNumber,
+          mapName: activeMap.mapName,
+        }))
+        .reverse()
+    : activeMap.allLogs.slice(0, 20);
+  const currentPlaybackEvent = playbackFrame ?? null;
+  const playbackStepLabel =
+    playbackSummary && playbackTotalFrames
+      ? `${Math.max(0, Math.min(playbackTotalFrames, roundPlayback.frameIndex + 1))}/${playbackTotalFrames}`
+      : null;
+  const liveStatusLabel = playbackSummary
+    ? currentPlaybackEvent?.openingKill
+      ? "Opening frag"
+      : currentPlaybackEvent?.bombPlanted
+        ? "Bomb planted"
+        : currentPlaybackEvent?.defuse
+          ? "Defuse attempt"
+          : currentPlaybackEvent?.kind === "clutch"
+            ? "Clutch live"
+            : "Round live"
+    : null;
+
+  if (layoutMode === "coach") {
+    return (
+      <CoachLiveMatchView
+        match={match}
+        activeMap={activeMap}
+        latestRound={latestRound}
+        teamAPlayers={teamAPlayers}
+        teamBPlayers={teamBPlayers}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        roundClock={roundClock}
+        roundProgress={roundProgress}
+        roundClockLabel={roundClockLabel}
+        layoutMode={layoutMode}
+        onLayoutModeChange={onLayoutModeChange}
+        presentationMode={presentationMode}
+        onPresentationModeChange={onPresentationModeChange}
+        currentPlaybackEvent={currentPlaybackEvent}
+        feedEntries={feedEntries}
+        liveStatusLabel={liveStatusLabel}
+        playbackStepLabel={playbackStepLabel}
+        mobileSite={mobileSite}
+        siteMode={siteMode}
+        onSiteModeChange={onSiteModeChange}
+        radarMarkers={radarMarkers}
+        latestRadarMarker={latestRadarMarker}
+        killFeedEntries={killFeedEntries}
+        playbackRate={playbackRate}
+        onPlaybackRateChange={onPlaybackRateChange}
+        soundDesignEnabled={soundDesignEnabled}
+        onSoundDesignChange={onSoundDesignChange}
+        expectancySeries={expectancySeries}
+        currentExpectancyPoint={currentExpectancyPoint}
+      />
+    );
+  }
+
+  if (layoutMode === "overlay") {
+    return (
+      <OverlayLiveMatchView
+        match={match}
+        activeMap={activeMap}
+        latestRound={latestRound}
+        teamAPlayers={teamAPlayers}
+        teamBPlayers={teamBPlayers}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        roundClock={roundClock}
+        roundProgress={roundProgress}
+        roundClockLabel={roundClockLabel}
+        layoutMode={layoutMode}
+        onLayoutModeChange={onLayoutModeChange}
+        presentationMode={presentationMode}
+        onPresentationModeChange={onPresentationModeChange}
+        currentPlaybackEvent={currentPlaybackEvent}
+        feedEntries={feedEntries}
+        liveStatusLabel={liveStatusLabel}
+        playbackStepLabel={playbackStepLabel}
+        mobileSite={mobileSite}
+        siteMode={siteMode}
+        onSiteModeChange={onSiteModeChange}
+        radarMarkers={radarMarkers}
+        latestRadarMarker={latestRadarMarker}
+        killFeedEntries={killFeedEntries}
+        playbackRate={playbackRate}
+        onPlaybackRateChange={onPlaybackRateChange}
+        soundDesignEnabled={soundDesignEnabled}
+        onSoundDesignChange={onSoundDesignChange}
+        expectancySeries={expectancySeries}
+        currentExpectancyPoint={currentExpectancyPoint}
+      />
+    );
+  }
+
+  if (mobileSite || layoutMode === "phone") {
+    return (
+      <PhoneLandscapeLiveMatchView
+        match={match}
+        activeMap={activeMap}
+        latestRound={latestRound}
+        teamAPlayers={teamAPlayers}
+        teamBPlayers={teamBPlayers}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        roundClock={roundClock}
+        roundProgress={roundProgress}
+        layoutMode={layoutMode}
+        onLayoutModeChange={onLayoutModeChange}
+        presentationMode={presentationMode}
+        onPresentationModeChange={onPresentationModeChange}
+        currentPlaybackEvent={currentPlaybackEvent}
+        feedEntries={feedEntries}
+        liveStatusLabel={liveStatusLabel}
+        playbackStepLabel={playbackStepLabel}
+        fullscreen={fullscreen}
+        mobileSite={mobileSite}
+        siteMode={siteMode}
+        onSiteModeChange={onSiteModeChange}
+        radarMarkers={radarMarkers}
+        latestRadarMarker={latestRadarMarker}
+        playbackRate={playbackRate}
+        onPlaybackRateChange={onPlaybackRateChange}
+        soundDesignEnabled={soundDesignEnabled}
+        onSoundDesignChange={onSoundDesignChange}
+      />
+    );
+  }
+
+  return (
+    <div className="grid h-[calc(100vh-102px)] min-h-0 grid-cols-[minmax(250px,300px)_minmax(0,1fr)_minmax(250px,300px)] gap-3 overflow-hidden 2xl:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(280px,320px)]">
+      <BroadcastTeamColumn
+        team={match.teamA}
+        score={activeMap.score.teamA}
+        side={teamAState.side}
+        players={teamAPlayers}
+        coach={match.teamA.coach}
+        timeoutsRemaining={match.timeoutsRemaining.teamA}
+      />
+      <div className="flex min-h-0 flex-col gap-4 overflow-hidden">
+        <Panel
+          title={t("live_match")}
+          action={
+            <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+              <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
+              <PresentationModeSwitch mode={presentationMode} onChange={onPresentationModeChange} />
+              <PlaybackSpeedSwitch value={playbackRate} onChange={onPlaybackRateChange} compact />
+              <SoundDesignSwitch enabled={soundDesignEnabled} onToggle={onSoundDesignChange} />
+              <LayoutModeSwitch layoutMode={layoutMode} onChange={onLayoutModeChange} mobileSite={mobileSite} />
+            </div>
+          }
+          className="p-4"
+          headerClassName="mb-2"
+        >
+          <div className="rounded-2xl border border-border bg-card/70 p-4">
+            <div className="flex items-center justify-between gap-6">
+              <TeamHeader team={match.teamA} score={activeMap.score.teamA} side={activeMap.teamAState.side} />
+              <div className="min-w-0 flex-1 text-center">
+                <div className="truncate font-display text-2xl text-accent xl:text-3xl">{activeMap.mapName}</div>
+                <div className="mt-1 text-xs text-muted">
+                  {latestRound?.displayRound ?? `R${activeMap.roundNumber}`} · {activeMap.overtimeNumber ? `OT ${activeMap.overtimeNumber}` : "Regulation"}
+                </div>
+                <div className={classNames("mt-2 numbers text-xl", roundClock <= 10 ? "text-red-400" : "text-text")}>
+                  {roundClockLabel}
+                </div>
+              </div>
+              <TeamHeader team={match.teamB} score={activeMap.score.teamB} side={activeMap.teamBState.side} reverse />
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface">
+              <div
+                className={classNames("h-full rounded-full transition-all", roundClock <= 10 ? "bg-red-500" : "bg-accent")}
+                style={{ width: `${Math.max(4, roundProgress * 100)}%` }}
+              />
+            </div>
+          </div>
+        </Panel>
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1.08fr)_340px] gap-3 overflow-hidden">
+          <div className="grid min-h-0 grid-cols-[minmax(180px,210px)_minmax(0,1fr)_minmax(320px,390px)] gap-3 overflow-hidden">
+            <Panel title={t("round_history")} subtitle="Every round stays visible in a compact timeline." className="flex min-h-0 flex-col overflow-hidden p-3">
+              <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                {[...activeMap.rounds].reverse().map((roundSummary) => (
+                  <div
+                    key={`${roundSummary.roundNumber}_${roundSummary.mapName}`}
+                    className={classNames(
+                      "rounded-xl border px-3 py-2",
+                      roundSummary.winnerSide === "CT"
+                        ? "border-sky-500/25 bg-sky-500/10"
+                        : "border-accent/25 bg-accent/10"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-display text-lg text-text">{roundSummary.displayRound}</div>
+                      <div className="numbers text-xs text-text">
+                        {roundSummary.scoreAfter.teamA}-{roundSummary.scoreAfter.teamB}
+                      </div>
+                    </div>
+                    <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted">
+                      {roundSummary.winnerSide} · A {roundTypeLabel(roundSummary.roundType.teamA)} / B {roundTypeLabel(roundSummary.roundType.teamB)}
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted">
+                      {roundSummary.bombPlanted ? "Plant" : "No plant"} · {reasonLabel(roundSummary.reason)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+            <Panel title={t("round_hud")} subtitle="Latest call, leaders, clutch state, and live expectancy." className="min-h-0 overflow-hidden p-3">
+              {latestRound ? (
+                <div className="grid h-full min-h-0 grid-rows-[auto_auto_1fr] gap-3">
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.2em] text-muted">
+                          {playbackSummary ? "Live Round" : "Latest Round"}
+                        </div>
+                        <div className="font-display text-3xl text-text">{latestRound.strategy}</div>
+                        <div className="mt-1 text-sm text-muted">
+                          {playbackSummary
+                            ? currentPlaybackEvent?.label ?? "Freeze time, buys locked in, waiting for the first duel."
+                            : `${latestRound.winnerKey === "teamA" ? match.teamA.tag : match.teamB.tag} win by ${reasonLabel(latestRound.reason)}`}
+                        </div>
+                      </div>
+                      <div className="rounded-full border border-border px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-muted">
+                        {playbackSummary
+                          ? `${liveStatusLabel ?? "Live"}${playbackStepLabel ? ` · ${playbackStepLabel}` : ""}`
+                          : latestRound.displayRound}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted">
+                      <div className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                        A buy: <span className="ml-1 uppercase text-text">{roundTypeLabel(latestRound.roundType.teamA)}</span>
+                      </div>
+                      <div className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                        B buy: <span className="ml-1 uppercase text-text">{roundTypeLabel(latestRound.roundType.teamB)}</span>
+                      </div>
+                      <div className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                        {latestRound.bombPlanted ? `Plant ${latestRound.plantSite ?? ""}` : "No plant"}
+                      </div>
+                    </div>
+                    {latestRound.timeoutCalled && (
+                      <div className="mt-3 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-accent">
+                        Tactical timeout: {latestRound.timeoutCalled === "teamA" ? match.teamA.coach.nickname : match.teamB.coach.nickname}
+                      </div>
+                    )}
+                    {playbackSummary && currentPlaybackEvent?.openingKill && (
+                      <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                        First death of the round just landed.
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <LeaderCard
+                      title={match.teamA.tag}
+                      nickname={latestRound.spectatorLeaders.teamA.nickname}
+                      rating={latestRound.spectatorLeaders.teamA.rating}
+                      side={teamAState.side}
+                    />
+                    <LeaderCard
+                      title={match.teamB.tag}
+                      nickname={latestRound.spectatorLeaders.teamB.nickname}
+                      rating={latestRound.spectatorLeaders.teamB.rating}
+                      side={teamBState.side}
+                    />
+                  </div>
+                  <div className="grid min-h-0 grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-border bg-card/60 p-4">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-muted">
+                        {playbackSummary ? "Current Event" : "Spotlight"}
+                      </div>
+                      <div className="mt-2 font-display text-2xl text-text">
+                        {playbackSummary
+                          ? currentPlaybackEvent?.label ?? "Freeze time"
+                          : latestRound.clutch
+                            ? `${latestRound.clutch.nickname} 1v${latestRound.clutch.size}`
+                            : "Structured round"}
+                      </div>
+                      <div className="mt-2 text-sm text-muted">
+                        {playbackSummary
+                          ? "The round is being played event by event for full-stream coverage."
+                          : latestRound.highlight ?? "No special swing moment on the latest round."}
+                      </div>
+                    </div>
+                    <WinExpectancyCard
+                      currentExpectancyPoint={currentExpectancyPoint}
+                      expectancySeries={expectancySeries}
+                      teamA={match.teamA}
+                      teamB={match.teamB}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border px-6 text-center text-sm text-muted">
+                  Waiting for the first round to resolve.
+                </div>
+              )}
+            </Panel>
+            <div className="grid min-h-0 grid-rows-[minmax(0,1.55fr)_minmax(0,0.85fr)] gap-3 overflow-hidden">
+              <KillFeedPanel
+                entries={killFeedEntries}
+                title="Kill Feed"
+                subtitle=""
+                limit={10}
+                emphasized
+                className="min-h-[250px]"
+              />
+              <Panel title={t("live_feed")} subtitle="Newest play-by-play stays on top for casting." className="flex min-h-0 flex-col overflow-hidden p-3">
+                <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                  {feedEntries.map((log, index) => (
+                    <div key={log.id} className={classNames("rounded-xl border px-3 py-2.5", playbackSummary && index === 0 ? "border-accent/40 bg-accent/10" : "border-border bg-card/60")}>
+                      <div className="numbers text-[11px] text-accent">[{log.clock}] {log.mapName} {`R${log.roundNumber}`}</div>
+                      <div className="mt-1 text-sm leading-5 text-text">{log.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            </div>
+          </div>
+          <div className="grid min-h-0 grid-cols-[minmax(300px,380px)_minmax(0,1fr)] gap-3 overflow-hidden">
+            <Panel title="Radar" subtitle="Death markers stay on the map for the whole round." className="overflow-hidden p-3">
+              <div className="mb-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setRadarExpanded(true)}
+                  className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-accent transition hover:border-accent hover:bg-accent/15"
+                >
+                  Open Radar
+                </button>
+              </div>
+              <RadarPanel
+                mapName={activeMap.mapName}
+                markers={radarMarkers}
+                latestMarker={latestRadarMarker}
+                sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+                showSidebar={false}
+              />
+            </Panel>
+            <Panel title={t("economy_graph")} subtitle="Equipment value by round." className="overflow-hidden p-3">
+              <div className="h-full min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={economyData}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                    <XAxis dataKey="label" stroke="#6b7280" tick={{ fill: "#6b7280", fontSize: 11 }} />
+                    <YAxis stroke="#6b7280" tick={{ fill: "#6b7280", fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#111318",
+                        border: "1px solid #2a2d36",
+                        borderRadius: 16,
+                        color: "#e8eaf0",
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="teamA"
+                      stroke="#f5a623"
+                      strokeWidth={2.5}
+                      dot={economyData.length <= 2 ? { r: 4, fill: "#f5a623", strokeWidth: 0 } : false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="teamB"
+                      stroke="#5b8dd9"
+                      strokeWidth={2.5}
+                      dot={economyData.length <= 2 ? { r: 4, fill: "#5b8dd9", strokeWidth: 0 } : false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+      <BroadcastTeamColumn
+        team={match.teamB}
+        score={activeMap.score.teamB}
+        side={teamBState.side}
+        players={teamBPlayers}
+        coach={match.teamB.coach}
+        timeoutsRemaining={match.timeoutsRemaining.teamB}
+        reverse
+      />
+      {radarExpanded && (
+        <RadarExpandedModal
+          mapName={activeMap.mapName}
+          markers={radarMarkers}
+          latestMarker={latestRadarMarker}
+          sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+          onClose={() => setRadarExpanded(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function CoachLiveMatchView({
+  match,
+  activeMap,
+  latestRound,
+  teamAPlayers,
+  teamBPlayers,
+  teamAState,
+  teamBState,
+  roundClock,
+  roundProgress,
+  roundClockLabel,
+  layoutMode,
+  onLayoutModeChange,
+  presentationMode,
+  onPresentationModeChange,
+  currentPlaybackEvent = null,
+  feedEntries = [],
+  killFeedEntries = [],
+  liveStatusLabel = null,
+  playbackStepLabel = null,
+  playbackRate = 1.25,
+  onPlaybackRateChange,
+  soundDesignEnabled = false,
+  onSoundDesignChange,
+  mobileSite = false,
+  siteMode = "desktop",
+  onSiteModeChange,
+  radarMarkers = [],
+  latestRadarMarker = null,
+  expectancySeries = [],
+  currentExpectancyPoint = null,
+}) {
+  const isLandscape = useIsLandscape(mobileSite);
+  const [radarExpanded, setRadarExpanded] = useState(false);
+  const teamAAlive = teamAPlayers.filter((player) => player.alive).length;
+  const teamBAlive = teamBPlayers.filter((player) => player.alive).length;
+
+  if (mobileSite && !isLandscape) {
+    return <RotatePhonePrompt match={match} activeMap={activeMap} siteMode={siteMode} onSiteModeChange={onSiteModeChange} />;
+  }
+
+  return (
+    <div
+      className={classNames(
+        "grid h-[100dvh] min-h-0 overflow-hidden",
+        mobileSite ? "grid-rows-[84px_minmax(0,1fr)] gap-2 px-0 py-0" : "grid-rows-[108px_minmax(0,1fr)] gap-4"
+      )}
+    >
+      <div className={classNames("panel flex items-center justify-between gap-3", mobileSite ? "rounded-none border-x-0 border-t-0 px-2 py-2" : "px-4 py-4")}>
+        <div className="flex items-center gap-3">
+          <div className="text-center">
+            <div className="numbers text-2xl text-text sm:text-3xl">{teamAAlive}</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted">Alive</div>
+          </div>
+          <div className="numbers text-3xl text-accent sm:text-4xl xl:text-5xl">{activeMap.score.teamA}</div>
+          <div className="min-w-0">
+            <div className="font-display text-xl text-text sm:text-2xl">{match.teamA.tag}</div>
+            <div className={classNames("text-[10px] uppercase tracking-[0.18em]", sideToneClasses(teamAState.side).text)}>{teamAState.side}</div>
+          </div>
+        </div>
+        <div className="min-w-0 flex-1 text-center">
+          <div className="font-display text-lg text-accent sm:text-2xl">{activeMap.mapName}</div>
+          <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-muted">
+            {latestRound?.displayRound ?? `R${activeMap.roundNumber}`} · {liveStatusLabel ?? "Coach View"}{playbackStepLabel ? ` · ${playbackStepLabel}` : ""}
+          </div>
+          <div className={classNames("mt-1 numbers text-xl sm:text-2xl", roundClock <= 10 ? "text-red-400" : "text-text")}>{roundClockLabel}</div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 text-right">
+            <div className="font-display text-xl text-text sm:text-2xl">{match.teamB.tag}</div>
+            <div className={classNames("text-[10px] uppercase tracking-[0.18em]", sideToneClasses(teamBState.side).text)}>{teamBState.side}</div>
+          </div>
+          <div className="numbers text-3xl text-sky-300 sm:text-4xl xl:text-5xl">{activeMap.score.teamB}</div>
+          <div className="text-center">
+            <div className="numbers text-2xl text-text sm:text-3xl">{teamBAlive}</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted">Alive</div>
+          </div>
+        </div>
+      </div>
+      <div
+        className={classNames(
+          "grid min-h-0 overflow-hidden",
+          mobileSite ? "grid-cols-[138px_minmax(0,1fr)_138px] gap-2 px-2 pb-2" : "grid-cols-[minmax(230px,280px)_minmax(0,1fr)_minmax(230px,280px)] gap-4"
+        )}
+      >
+        <CoachRosterColumn team={match.teamA} players={teamAPlayers} side={teamAState.side} mobile={mobileSite} />
+        <div className={classNames("grid min-h-0 gap-3 overflow-hidden", mobileSite ? "grid-rows-[auto_minmax(0,1fr)_280px_200px]" : "grid-rows-[auto_minmax(0,1fr)_230px]")}>
+          <div className={classNames("panel flex flex-wrap items-center justify-between gap-2", mobileSite ? "rounded-none border-x-0 px-2 py-2" : "px-3 py-3")}>
+            <div className="flex flex-wrap items-center gap-2">
+              {!mobileSite && <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />}
+              <LayoutModeSwitch layoutMode={layoutMode} onChange={onLayoutModeChange} compact mobileSite={mobileSite} />
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <PresentationModeSwitch mode={presentationMode} onChange={onPresentationModeChange} />
+              <PlaybackSpeedSwitch value={playbackRate} onChange={onPlaybackRateChange} compact />
+              <SoundDesignSwitch enabled={soundDesignEnabled} onToggle={onSoundDesignChange} />
+            </div>
+          </div>
+          <div className={classNames("grid min-h-0 gap-3 overflow-hidden", mobileSite ? "grid-rows-[minmax(0,1fr)_280px]" : "grid-cols-[minmax(0,1fr)_minmax(320px,430px)]")}>
+            <Panel
+              title={mobileSite ? "" : "Coach View"}
+              subtitle=""
+              className={classNames("min-h-0 overflow-hidden", mobileSite ? "rounded-none border-x-0 p-2" : "p-3")}
+              headerClassName={mobileSite ? "mb-0" : "mb-2"}
+              action={
+                <button
+                  type="button"
+                  onClick={() => setRadarExpanded(true)}
+                  className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-accent transition hover:border-accent hover:bg-accent/15"
+                >
+                  Open Radar
+                </button>
+              }
+            >
+              <RadarPanel
+                mapName={activeMap.mapName}
+                markers={radarMarkers}
+                latestMarker={latestRadarMarker}
+                sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+                showSidebar={false}
+                showSummary={false}
+              />
+            </Panel>
+            <KillFeedPanel
+              entries={killFeedEntries}
+              title={mobileSite ? "" : "Kill Feed"}
+              subtitle=""
+              limit={mobileSite ? 8 : 14}
+              emphasized={!mobileSite}
+              compact={mobileSite}
+              className={classNames("min-h-0 overflow-hidden", mobileSite ? "rounded-none border-x-0 p-2" : "p-3")}
+            />
+          </div>
+          <div className={classNames("grid gap-3", mobileSite ? "grid-cols-[minmax(0,1fr)_280px]" : "grid-cols-[minmax(0,1fr)_minmax(320px,430px)]")}>
+            <Panel title={mobileSite ? "" : "Round Read"} subtitle={mobileSite ? "" : "Current call, bomb state, and pacing."} className="overflow-hidden p-3">
+              <div className="grid h-full gap-3">
+                <div className="rounded-2xl border border-border bg-card/60 px-3 py-3">
+                  <div className="font-display text-2xl text-text">{latestRound?.strategy ?? "Freeze time"}</div>
+                  <div className="mt-1 text-sm text-muted">
+                    {currentPlaybackEvent?.label ??
+                      `${latestRound?.winnerKey === "teamA" ? match.teamA.tag : match.teamB.tag} win by ${reasonLabel(latestRound?.reason)}`}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-xl border border-border bg-surface/70 px-3 py-2 text-muted">
+                    {match.teamA.tag}: <span className="text-text">{roundTypeLabel(latestRound?.roundType?.teamA)}</span>
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface/70 px-3 py-2 text-muted">
+                    {match.teamB.tag}: <span className="text-text">{roundTypeLabel(latestRound?.roundType?.teamB)}</span>
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface/70 px-3 py-2 text-muted">
+                    Bomb: <span className="text-text">{latestRound?.bombPlanted ? latestRound?.plantSite ?? "Planted" : "No plant"}</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border bg-surface/70 px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Round Win Expectancy</div>
+                    <div className="numbers text-sm text-text">
+                      {match.teamA.tag} {currentExpectancyPoint?.teamA ?? 50}% · {match.teamB.tag} {currentExpectancyPoint?.teamB ?? 50}%
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-card">
+                    <div className="flex h-full">
+                      <div className="bg-accent" style={{ width: `${currentExpectancyPoint?.teamA ?? 50}%` }} />
+                      <div className="bg-sky-400" style={{ width: `${currentExpectancyPoint?.teamB ?? 50}%` }} />
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-muted">
+                    {expectancySeries.length
+                      ? `${expectancySeries.length} checkpoints tracked through the round playback.`
+                      : "Expectancy will update once the round timeline begins."}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card/60 px-3 py-3 text-sm text-muted">
+                  {latestRound?.highlight ?? "Round is unfolding zone by zone on the radar."}
+                </div>
+              </div>
+            </Panel>
+            <Panel title={mobileSite ? "" : "Live Feed"} subtitle={mobileSite ? "" : "Recent calls for casting."} className="flex min-h-0 flex-col overflow-hidden p-3">
+              <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                {(feedEntries.length ? feedEntries : activeMap.allLogs.slice(0, 8)).slice(0, mobileSite ? 5 : 8).map((log) => (
+                  <div key={log.id} className="rounded-xl border border-border bg-card/60 px-3 py-2">
+                    <div className="numbers text-[11px] text-accent">[{log.clock}] {`R${log.roundNumber}`}</div>
+                    <div className="mt-1 text-sm leading-5 text-text">{log.label}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </div>
+        <CoachRosterColumn team={match.teamB} players={teamBPlayers} side={teamBState.side} reverse mobile={mobileSite} />
+      </div>
+      {radarExpanded && (
+        <RadarExpandedModal
+          mapName={activeMap.mapName}
+          markers={radarMarkers}
+          latestMarker={latestRadarMarker}
+          sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+          onClose={() => setRadarExpanded(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function OverlayLiveMatchView({
+  match,
+  activeMap,
+  latestRound,
+  teamAPlayers,
+  teamBPlayers,
+  teamAState,
+  teamBState,
+  roundClock,
+  roundProgress,
+  roundClockLabel,
+  layoutMode,
+  onLayoutModeChange,
+  presentationMode,
+  onPresentationModeChange,
+  currentPlaybackEvent = null,
+  feedEntries = [],
+  killFeedEntries = [],
+  liveStatusLabel = null,
+  playbackStepLabel = null,
+  playbackRate = 1.25,
+  onPlaybackRateChange,
+  soundDesignEnabled = false,
+  onSoundDesignChange,
+  siteMode = "desktop",
+  onSiteModeChange,
+  radarMarkers = [],
+  latestRadarMarker = null,
+  expectancySeries = [],
+  currentExpectancyPoint = null,
+}) {
+  const [radarExpanded, setRadarExpanded] = useState(false);
+  const currentFrameIndex = Math.max(0, expectancySeries.length - 1);
+
+  return (
+    <div className="grid h-[calc(100vh-102px)] min-h-0 grid-rows-[96px_minmax(0,1fr)_260px] gap-3 overflow-hidden">
+      <div className="panel flex items-center justify-between gap-4 px-4 py-4">
+        <div className="flex items-center gap-4">
+          <div className="numbers text-3xl text-accent xl:text-4xl">{activeMap.score.teamA}</div>
+          <div>
+            <div className="font-display text-2xl text-text">{match.teamA.tag}</div>
+            <div className={classNames("text-[11px] uppercase tracking-[0.18em]", sideToneClasses(teamAState.side).text)}>
+              {teamAState.side} · {teamAPlayers.filter((player) => player.alive).length} alive
+            </div>
+          </div>
+        </div>
+        <div className="min-w-0 flex-1 text-center">
+          <div className="truncate font-display text-2xl text-accent xl:text-3xl">{activeMap.mapName}</div>
+          <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-muted">
+            {latestRound?.displayRound ?? `R${activeMap.roundNumber}`} · {liveStatusLabel ?? "Broadcast Overlay"}{playbackStepLabel ? ` · ${playbackStepLabel}` : ""}
+          </div>
+          <div className={classNames("mt-2 numbers text-2xl", roundClock <= 10 ? "text-red-400" : "text-text")}>{roundClockLabel}</div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="font-display text-2xl text-text">{match.teamB.tag}</div>
+            <div className={classNames("text-[11px] uppercase tracking-[0.18em]", sideToneClasses(teamBState.side).text)}>
+              {teamBState.side} · {teamBPlayers.filter((player) => player.alive).length} alive
+            </div>
+          </div>
+          <div className="numbers text-3xl text-sky-300 xl:text-4xl">{activeMap.score.teamB}</div>
+        </div>
+      </div>
+      <div className="grid min-h-0 grid-cols-[minmax(210px,240px)_minmax(0,1fr)_minmax(280px,340px)] gap-3 overflow-hidden">
+        <CoachRosterColumn team={match.teamA} players={teamAPlayers} side={teamAState.side} />
+        <Panel
+          title="Broadcast Overlay"
+          subtitle="Radar-first stream layout with expectancy, timeline, and clean kill calls."
+          className="min-h-0 overflow-hidden p-3"
+          headerClassName="mb-3 flex-wrap"
+          action={
+            <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+              <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
+              <PresentationModeSwitch mode={presentationMode} onChange={onPresentationModeChange} />
+              <PlaybackSpeedSwitch value={playbackRate} onChange={onPlaybackRateChange} compact />
+              <SoundDesignSwitch enabled={soundDesignEnabled} onToggle={onSoundDesignChange} />
+              <LayoutModeSwitch layoutMode={layoutMode} onChange={onLayoutModeChange} />
+              <button
+                type="button"
+                onClick={() => setRadarExpanded(true)}
+                className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-accent transition hover:border-accent hover:bg-accent/15"
+              >
+                Open Radar
+              </button>
+            </div>
+          }
+          >
+          <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-3">
+            <RadarPanel
+              mapName={activeMap.mapName}
+              markers={radarMarkers}
+              latestMarker={latestRadarMarker}
+              sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+              showSidebar={false}
+              showSummary={false}
+            />
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(300px,380px)] gap-3">
+              <ObserverTimelinePanel
+                summary={latestRound}
+                currentFrameIndex={currentFrameIndex}
+                title="Observer Timeline"
+                subtitle="Overlay checkpoints for the current round."
+              />
+              <WinExpectancyCard
+                currentExpectancyPoint={currentExpectancyPoint}
+                expectancySeries={expectancySeries}
+                teamA={match.teamA}
+                teamB={match.teamB}
+              />
+            </div>
+          </div>
+        </Panel>
+        <div className="grid min-h-0 grid-rows-[300px_minmax(0,1fr)] gap-3 overflow-hidden">
+          <CoachRosterColumn team={match.teamB} players={teamBPlayers} side={teamBState.side} reverse />
+          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden">
+            <Panel title="Kill Feed" subtitle="Latest frags, weapons, and side losses." className="flex min-h-0 flex-col overflow-hidden p-3">
+              <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                {killFeedEntries.length ? (
+                  killFeedEntries.slice(0, 10).map((entry) => (
+                    <div key={entry.id} className="rounded-xl border border-border bg-card/60 px-3 py-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="numbers text-[11px] text-accent">[{entry.clock}]</div>
+                        <div
+                          className={classNames(
+                            "rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]",
+                            entry.victimSide === "CT" ? "bg-sky-500/10 text-sky-300" : "bg-accent/10 text-accent"
+                          )}
+                        >
+                          {entry.victimSide === "CT" ? "CT down" : "T down"}
+                        </div>
+                      </div>
+                      <div className="mt-1 text-sm text-text">
+                        <span className="font-semibold">{entry.killerNickname ?? "Unknown"}</span>{" "}
+                        <span className="text-accent">[{entry.weaponLabel ?? "UTIL"}]</span>{" "}
+                        <span className="text-muted">vs</span>{" "}
+                        <span className="font-semibold">{entry.victimNickname ?? "Unknown"}</span>
+                      </div>
+                      <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted">{entry.zone ?? entry.site ?? "mid"}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted">
+                    Waiting for the first frag.
+                  </div>
+                )}
+              </div>
+            </Panel>
+            <Panel title="Live Feed" subtitle="Caster-ready round narration." className="flex min-h-0 flex-col overflow-hidden p-3">
+              <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                {feedEntries.slice(0, 10).map((log) => (
+                  <div key={log.id} className="rounded-xl border border-border bg-card/60 px-3 py-2">
+                    <div className="numbers text-[11px] text-accent">[{log.clock}] {log.mapName} {`R${log.roundNumber}`}</div>
+                    <div className="mt-1 text-sm leading-5 text-text">{log.label}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-border bg-card/60 px-4 py-3">
+        <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted">Round Progress</div>
+        <div className="h-2 overflow-hidden rounded-full bg-surface">
+          <div className={classNames("h-full rounded-full transition-all", roundClock <= 10 ? "bg-red-500" : "bg-accent")} style={{ width: `${Math.max(4, roundProgress * 100)}%` }} />
+        </div>
+        <div className="mt-2 text-sm text-muted">{currentPlaybackEvent?.label ?? latestRound?.highlight ?? "Overlay tracks the round event by event."}</div>
+      </div>
+      {radarExpanded && (
+        <RadarExpandedModal
+          mapName={activeMap.mapName}
+          markers={radarMarkers}
+          latestMarker={latestRadarMarker}
+          sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+          onClose={() => setRadarExpanded(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function CoachRosterColumn({ team, players, side, reverse = false, mobile = false }) {
+  const tone = sideToneClasses(side);
+  return (
+    <section className={classNames("panel min-h-0 overflow-hidden", mobile ? "rounded-none border-x-0 p-2" : "p-3")}>
+      <div className={classNames("mb-3 flex items-center justify-between rounded-2xl border px-3 py-3", tone.border, tone.bg, reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="font-display text-2xl text-text">{team.tag}</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">{team.coach.nickname}</div>
+        </div>
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-surface">{renderLogo(team.logo, team.tag[0])}</div>
+      </div>
+      <div className="scrollbar-thin grid min-h-0 gap-2 overflow-y-auto pr-1">
+        {players.map((player) => (
+          <CoachPlayerRow key={player.id} player={player} side={side} reverse={reverse} mobile={mobile} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CoachPlayerRow({ player, side, reverse = false, mobile = false }) {
+  const tone = sideToneClasses(side);
+  return (
+    <div className={classNames("rounded-2xl border px-3 py-2.5", player.alive ? tone.border : "border-border bg-surface/60 opacity-75")}>
+      <div className={classNames("flex items-center justify-between gap-3", reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="truncate font-display text-lg text-text">{player.nickname}</div>
+          <div className="numbers text-xs text-muted">{player.kills}/{player.deaths}/{player.assists}</div>
+        </div>
+        <div className={classNames("rounded-lg px-2 py-1 text-[11px] font-semibold", weaponBadgeClasses(player.weaponType))}>
+          [{player.weaponLabel}]
+        </div>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface">
+        <div className={classNames("h-full rounded-full", tone.bar)} style={{ width: `${player.alive ? player.hp : 0}%` }} />
+      </div>
+      <PlayerFormStrip series={player.formSeries} reverse={reverse} compact={mobile} />
+      <div className={classNames("mt-2 flex items-center justify-between gap-2 text-[11px]", reverse && "flex-row-reverse")}>
+        <span className="text-muted">{player.alive ? `${player.hp} HP` : "OUT"}</span>
+        <span className="text-muted">{player.armor ? (player.helmet ? "Armor+H" : "Armor") : "No Armor"} · U {player.utilityCount}</span>
+        {!mobile && <span className="numbers text-emerald-300">{formatMoney(player.money)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function TeamHeader({ team, score, side, reverse = false }) {
+  return (
+    <div className={classNames("flex items-center gap-4", reverse && "flex-row-reverse text-right")}>
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-surface">
+        {renderLogo(team.logo)}
+      </div>
+      <div>
+        <div className="font-display text-4xl text-text">{score}</div>
+        <div className="font-display text-2xl text-text">{team.tag}</div>
+        <div className={classNames("text-xs uppercase tracking-[0.2em]", side === "CT" ? "text-sky-300" : "text-accent")}>
+          {side}-Side
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LayoutModeSwitch({ layoutMode, onChange, compact = false, mobileSite = false }) {
+  const modes = mobileSite
+    ? [
+        { id: "broadcast", label: compact ? "Detail" : "Detailed" },
+        { id: "coach", label: "Coach" },
+      ]
+    : [
+        { id: "broadcast", label: compact ? "Desk" : "Broadcast" },
+        { id: "overlay", label: "Overlay" },
+        { id: "coach", label: "Coach" },
+        { id: "phone", label: "Phone" },
+      ];
+
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-border bg-card/70 p-1">
+      {modes.map((mode) => (
+        <button
+          key={mode.id}
+          type="button"
+          onClick={() => onChange?.(mode.id)}
+          className={classNames(
+            "rounded-lg border px-3 py-1.5 transition",
+            compact ? "text-[11px]" : "text-xs uppercase tracking-[0.16em]",
+            layoutMode === mode.id
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-transparent text-muted hover:text-text"
+          )}
+        >
+          {mode.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SiteModeSwitch({ siteMode, onChange, compact = false }) {
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
+      {[
+        { id: "desktop", label: compact ? "PC" : "Desktop" },
+        { id: "mobile", label: "Mobile" },
+      ].map((mode) => (
+        <button
+          key={mode.id}
+          type="button"
+          onClick={() => onChange?.(mode.id)}
+          className={classNames(
+            "rounded-lg border px-3 py-1.5 transition",
+            compact ? "text-[11px]" : "text-xs uppercase tracking-[0.16em]",
+            siteMode === mode.id
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-transparent text-muted hover:text-text"
+          )}
+        >
+          {mode.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PresentationModeSwitch({ mode, onChange }) {
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
+      {[
+        { id: "semi", label: "Semi-Live" },
+        { id: "live", label: "Live" },
+      ].map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onChange?.(item.id)}
+          className={classNames(
+            "rounded-lg border px-3 py-1.5 text-xs uppercase tracking-[0.14em] transition",
+            mode === item.id
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-transparent text-muted hover:text-text"
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PlaybackSpeedSwitch({ value, onChange, compact = false }) {
+  const options = [
+    { value: 0.85, label: "Fast" },
+    { value: 1, label: "1x" },
+    { value: 1.25, label: "Slow" },
+    { value: 1.55, label: "Slower" },
+    { value: 1.85, label: "Slowest" },
+  ];
+
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange?.(option.value)}
+          className={classNames(
+            "rounded-lg border px-3 py-1.5 transition",
+            compact ? "text-[11px]" : "text-xs uppercase tracking-[0.14em]",
+            Math.abs(value - option.value) < 0.001
+              ? "border-accent bg-accent/10 text-accent"
+              : "border-transparent text-muted hover:text-text"
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SoundDesignSwitch({ enabled, onToggle }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle?.(!enabled)}
+      className={classNames(
+        "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs uppercase tracking-[0.14em] transition",
+        enabled
+          ? "border-accent bg-accent/10 text-accent"
+          : "border-border bg-card/70 text-muted hover:text-text"
+      )}
+    >
+      {enabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+      {enabled ? "Sound On" : "Sound Off"}
+    </button>
+  );
+}
+
+function PhoneLandscapeLiveMatchView({
+  match,
+  activeMap,
+  latestRound,
+  teamAPlayers,
+  teamBPlayers,
+  teamAState,
+  teamBState,
+  roundClock,
+  roundProgress,
+  layoutMode,
+  onLayoutModeChange,
+  presentationMode = "semi",
+  onPresentationModeChange,
+  playbackRate = 1.25,
+  onPlaybackRateChange,
+  soundDesignEnabled = false,
+  onSoundDesignChange,
+  currentPlaybackEvent = null,
+  feedEntries = [],
+  liveStatusLabel = null,
+  playbackStepLabel = null,
+  fullscreen,
+  mobileSite = false,
+  siteMode = "desktop",
+  onSiteModeChange,
+  radarMarkers = [],
+  latestRadarMarker = null,
+}) {
+  const { t } = useI18n();
+  const isLandscape = useIsLandscape(mobileSite);
+  const [mobilePane, setMobilePane] = useState("round");
+  const economyData = activeMap.economyHistory.map((entry) => ({
+    ...entry,
+    label: entry.label,
+  }));
+
+  if (mobileSite && !isLandscape) {
+    return <RotatePhonePrompt match={match} activeMap={activeMap} siteMode={siteMode} onSiteModeChange={onSiteModeChange} />;
+  }
+
+  if (mobileSite) {
+    return (
+      <MobileLiveMatchView
+        match={match}
+        activeMap={activeMap}
+        latestRound={latestRound}
+        teamAPlayers={teamAPlayers}
+        teamBPlayers={teamBPlayers}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        roundClock={roundClock}
+        roundProgress={roundProgress}
+        economyData={economyData}
+        mobilePane={mobilePane}
+        onPaneChange={setMobilePane}
+        presentationMode={presentationMode}
+        onPresentationModeChange={onPresentationModeChange}
+        currentPlaybackEvent={currentPlaybackEvent}
+        feedEntries={feedEntries}
+        liveStatusLabel={liveStatusLabel}
+        playbackStepLabel={playbackStepLabel}
+        siteMode={siteMode}
+        onSiteModeChange={onSiteModeChange}
+        radarMarkers={radarMarkers}
+        latestRadarMarker={latestRadarMarker}
+        playbackRate={playbackRate}
+        onPlaybackRateChange={onPlaybackRateChange}
+        soundDesignEnabled={soundDesignEnabled}
+        onSoundDesignChange={onSoundDesignChange}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={classNames(
+        "grid min-h-0 grid-cols-[126px_minmax(0,1fr)_126px] gap-1.5 overflow-hidden sm:grid-cols-[145px_minmax(0,1fr)_145px]",
+        fullscreen ? "h-[100dvh] w-screen" : "h-[calc(100dvh-98px)]"
+      )}
+    >
+      <CompactTeamColumn
+        team={match.teamA}
+        score={activeMap.score.teamA}
+        side={teamAState.side}
+        players={teamAPlayers}
+      />
+      <div className="grid min-h-0 grid-rows-[76px_minmax(0,1fr)] gap-1.5 overflow-hidden">
+        <div className="panel overflow-hidden rounded-none border-x-0 border-t-0 p-2 sm:rounded-2xl sm:border sm:p-2.5">
+          <div className="rounded-xl border border-border bg-card/70 px-3 py-2">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div>
+                <div className="font-display text-sm text-text sm:text-lg">{match.teamA.tag}</div>
+                <div className="numbers text-2xl text-accent sm:text-3xl">{activeMap.score.teamA}</div>
+              </div>
+              <div className="text-center">
+                <div className="font-display text-lg text-accent sm:text-xl">{activeMap.mapName}</div>
+                <div className="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-muted">
+                  {latestRound?.displayRound ?? `R${activeMap.roundNumber}`} · {activeMap.overtimeNumber ? `OT ${activeMap.overtimeNumber}` : "Reg"}
+                </div>
+                <div className={classNames("numbers text-base", roundClock <= 10 ? "text-red-400" : "text-text")}>
+                  {formatRoundClock(roundClock)}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-display text-sm text-text sm:text-lg">{match.teamB.tag}</div>
+                <div className="numbers text-2xl text-sky-300 sm:text-3xl">{activeMap.score.teamB}</div>
+              </div>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface">
+              <div
+                className={classNames("h-full rounded-full transition-all", roundClock <= 10 ? "bg-red-500" : "bg-accent")}
+                style={{ width: `${Math.max(4, roundProgress * 100)}%` }}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <PresentationModeSwitch mode={presentationMode} onChange={onPresentationModeChange} />
+              <PlaybackSpeedSwitch value={playbackRate} onChange={onPlaybackRateChange} compact />
+              <SoundDesignSwitch enabled={soundDesignEnabled} onToggle={onSoundDesignChange} />
+              <LayoutModeSwitch layoutMode={layoutMode} onChange={onLayoutModeChange} compact mobileSite={mobileSite} />
+            </div>
+          </div>
+        </div>
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_164px] gap-1.5 overflow-hidden sm:grid-cols-[minmax(0,1fr)_190px]">
+          <Panel title={mobileSite ? "" : t("round_hud")} subtitle={mobileSite ? "" : "Core round context."} className="min-h-0 overflow-hidden rounded-none border-x-0 p-2 sm:rounded-2xl sm:border sm:p-2.5">
+            {latestRound ? (
+              <div className="grid h-full min-h-0 grid-rows-[auto_auto_1fr] gap-2">
+                <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-display text-2xl text-text">{latestRound.strategy}</div>
+                      <div className="text-xs text-muted">
+                        {currentPlaybackEvent?.label ??
+                          `${latestRound.winnerKey === "teamA" ? match.teamA.tag : match.teamB.tag} win by ${reasonLabel(latestRound.reason)}`}
+                      </div>
+                    </div>
+                    <div className="rounded-full border border-border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted">
+                      {liveStatusLabel ? `${liveStatusLabel}${playbackStepLabel ? ` · ${playbackStepLabel}` : ""}` : latestRound.displayRound}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-border bg-surface/80 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-muted">{match.teamA.tag}</div>
+                    <div className="mt-1 text-xs text-text">{roundTypeLabel(latestRound.roundType.teamA)}</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface/80 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-muted">{match.teamB.tag}</div>
+                    <div className="mt-1 text-xs text-text">{roundTypeLabel(latestRound.roundType.teamB)}</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface/80 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-muted">Bomb</div>
+                    <div className="mt-1 text-xs text-text">{latestRound.bombPlanted ? latestRound.plantSite ?? "Planted" : "No plant"}</div>
+                  </div>
+                </div>
+                <div className="grid min-h-0 grid-cols-2 gap-2">
+                  <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-muted">Top {match.teamA.tag}</div>
+                    <div className="mt-1 font-display text-xl text-text">{latestRound.spectatorLeaders.teamA.nickname}</div>
+                    <div className="numbers text-sm" style={{ color: getRatingColor(latestRound.spectatorLeaders.teamA.rating) }}>
+                      {latestRound.spectatorLeaders.teamA.rating}
+                    </div>
+                    <div className="mt-2 numbers text-xs text-muted">{formatMoney(latestRound.economy.teamATotalMoney)}</div>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-muted">Top {match.teamB.tag}</div>
+                    <div className="mt-1 font-display text-xl text-text">{latestRound.spectatorLeaders.teamB.nickname}</div>
+                    <div className="numbers text-sm" style={{ color: getRatingColor(latestRound.spectatorLeaders.teamB.rating) }}>
+                      {latestRound.spectatorLeaders.teamB.rating}
+                    </div>
+                    <div className="mt-2 numbers text-xs text-muted">{formatMoney(latestRound.economy.teamBTotalMoney)}</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border px-4 text-center text-xs text-muted">
+                Waiting for the first round.
+              </div>
+            )}
+          </Panel>
+          <Panel title={mobileSite ? "" : t("live_feed")} subtitle={mobileSite ? "" : "Recent calls."} className="flex min-h-0 flex-col overflow-hidden rounded-none border-x-0 p-2 sm:rounded-2xl sm:border sm:p-2.5">
+            <div className="scrollbar-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+              {(feedEntries.length ? feedEntries : activeMap.allLogs.slice(0, 8)).map((log, index) => (
+                <div key={log.id} className="rounded-xl border border-border bg-card/60 px-2.5 py-2">
+                  <div className="numbers text-[10px] text-accent">[{log.clock}] {`R${log.roundNumber}`}</div>
+                  <div className="mt-1 text-[11px] leading-4 text-text">{log.label}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      </div>
+      <CompactTeamColumn
+        team={match.teamB}
+        score={activeMap.score.teamB}
+        side={teamBState.side}
+        players={teamBPlayers}
+        reverse
+      />
+    </div>
+  );
+}
+
+function CompactTeamColumn({ team, score, side, players, reverse = false }) {
+  const tone = sideToneClasses(side);
+
+  return (
+    <section className="panel page-enter grid h-full min-h-0 grid-rows-[48px_repeat(5,minmax(0,1fr))] gap-1 rounded-none border-y-0 p-1.5 sm:rounded-2xl sm:border sm:p-2">
+      <div className={classNames("flex items-center justify-between rounded-xl border px-2.5 py-2", tone.border, tone.bg, reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="truncate font-display text-base text-text sm:text-xl">{team.tag}</div>
+          <div className={classNames("text-[10px] uppercase tracking-[0.16em]", tone.text)}>{side}</div>
+        </div>
+        <div className="numbers text-2xl text-text sm:text-3xl">{score}</div>
+      </div>
+      {players.map((player) => (
+        <CompactTeamPlayerCard key={player.id} player={player} side={side} reverse={reverse} />
+      ))}
+    </section>
+  );
+}
+
+function CompactTeamPlayerCard({ player, side, reverse = false }) {
+  const tone = sideToneClasses(side);
+
+  return (
+    <div className={classNames("rounded-lg border px-1.5 py-1", player.alive ? tone.border : "border-border bg-surface/60 opacity-70")}>
+      <div className={classNames("flex items-center justify-between gap-1", reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="truncate font-display text-[13px] text-text sm:text-sm">{player.nickname}</div>
+          <div className="numbers text-[10px] text-muted">
+            {player.kills}/{player.deaths}/{player.assists}
+          </div>
+        </div>
+        <div className={classNames("rounded-md px-1.5 py-0.5 text-[10px] font-semibold", weaponBadgeClasses(player.weaponType))}>
+          [{player.weaponLabel}]
+        </div>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface">
+        <div
+          className={classNames("h-full rounded-full", tone.bar)}
+          style={{ width: `${player.alive ? player.hp : 0}%` }}
+        />
+      </div>
+      <div className={classNames("mt-1 flex items-center justify-between text-[10px]", reverse && "flex-row-reverse")}>
+        <span className="text-muted">{player.alive ? `${player.hp} HP` : "OUT"}</span>
+        <span className="text-muted">U {player.utilityCount}</span>
+        <span style={{ color: getRatingColor(player.rating) }} className="numbers">
+          {player.rating}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RotatePhonePrompt({ match, activeMap, siteMode, onSiteModeChange }) {
+  return (
+    <div className="flex h-[100dvh] w-screen items-center justify-center overflow-hidden px-4 py-5">
+      <div className="panel w-full max-w-sm rounded-3xl p-6 text-center">
+        <div className="text-xs uppercase tracking-[0.24em] text-accent">Mobile Live</div>
+        <div className="mt-3 font-display text-4xl text-text">Rotate Phone</div>
+        <div className="mt-3 text-sm text-muted">
+          The mobile live HUD is tuned for landscape so all 10 players, the score, and round context stay visible.
+        </div>
+        <div className="mt-5 rounded-2xl border border-border bg-card/70 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="text-left">
+              <div className="font-display text-xl text-text">{match.teamA.tag}</div>
+              <div className="numbers text-2xl text-accent">{activeMap.score.teamA}</div>
+            </div>
+            <div className="text-center">
+              <div className="font-display text-xl text-accent">{activeMap.mapName}</div>
+              <div className="text-[10px] uppercase tracking-[0.18em] text-muted">Landscape</div>
+            </div>
+            <div className="text-right">
+              <div className="font-display text-xl text-text">{match.teamB.tag}</div>
+              <div className="numbers text-2xl text-sky-300">{activeMap.score.teamB}</div>
+            </div>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-center">
+          <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileLiveMatchView({
+  match,
+  activeMap,
+  latestRound,
+  teamAPlayers,
+  teamBPlayers,
+  teamAState,
+  teamBState,
+  roundClock,
+  roundProgress,
+  economyData,
+  mobilePane,
+  onPaneChange,
+  presentationMode = "semi",
+  onPresentationModeChange,
+  playbackRate = 1.25,
+  onPlaybackRateChange,
+  soundDesignEnabled = false,
+  onSoundDesignChange,
+  currentPlaybackEvent = null,
+  feedEntries = [],
+  liveStatusLabel = null,
+  playbackStepLabel = null,
+  siteMode = "mobile",
+  onSiteModeChange,
+  radarMarkers = [],
+  latestRadarMarker = null,
+}) {
+  const tabs = [
+    { id: "round", label: "Round" },
+    { id: "feed", label: "Feed" },
+    { id: "map", label: "Map" },
+    { id: "econ", label: "Economy" },
+  ];
+
+  return (
+    <div className="grid h-[100dvh] w-screen grid-cols-[112px_minmax(0,1fr)_112px] gap-1 overflow-hidden bg-hero-grid px-1 py-1 sm:grid-cols-[124px_minmax(0,1fr)_124px]">
+      <MobileCompactTeamColumn team={match.teamA} score={activeMap.score.teamA} side={teamAState.side} players={teamAPlayers} />
+      <div className="grid min-h-0 grid-rows-[38px_58px_32px_minmax(0,1fr)] gap-1 overflow-hidden">
+        <div className="panel rounded-2xl p-1.5">
+          <div className="flex items-center justify-between gap-1">
+            <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
+            <PresentationModeSwitch mode={presentationMode} onChange={onPresentationModeChange} />
+            <PlaybackSpeedSwitch value={playbackRate} onChange={onPlaybackRateChange} compact />
+            <SoundDesignSwitch enabled={soundDesignEnabled} onToggle={onSoundDesignChange} />
+          </div>
+        </div>
+        <div className="panel rounded-2xl p-2">
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-card/80 px-3 py-2">
+            <div className="min-w-0">
+              <div className="font-display text-sm text-text">{match.teamA.tag}</div>
+              <div className={classNames("text-[9px] uppercase tracking-[0.18em]", sideToneClasses(teamAState.side).text)}>{teamAState.side}</div>
+            </div>
+            <div className="numbers text-3xl text-accent">{activeMap.score.teamA}</div>
+            <div className="min-w-0 text-center">
+              <div className="font-display text-lg text-accent">{activeMap.mapName}</div>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-muted">{latestRound?.displayRound ?? `R${activeMap.roundNumber}`}</div>
+              <div className="numbers text-sm text-text">{formatRoundClock(roundClock)}</div>
+            </div>
+            <div className="numbers text-3xl text-sky-300">{activeMap.score.teamB}</div>
+            <div className="min-w-0 text-right">
+              <div className="font-display text-sm text-text">{match.teamB.tag}</div>
+              <div className={classNames("text-[9px] uppercase tracking-[0.18em]", sideToneClasses(teamBState.side).text)}>{teamBState.side}</div>
+            </div>
+          </div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface">
+            <div className={classNames("h-full rounded-full transition-all", roundClock <= 10 ? "bg-red-500" : "bg-accent")} style={{ width: `${Math.max(4, roundProgress * 100)}%` }} />
+          </div>
+        </div>
+        <div className="panel rounded-2xl p-1">
+          <div className="grid h-full grid-cols-4 gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onPaneChange(tab.id)}
+                className={classNames(
+                  "rounded-xl border text-[10px] uppercase tracking-[0.18em] transition",
+                  mobilePane === tab.id ? "border-accent bg-accent/10 text-accent" : "border-border bg-card/50 text-muted"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="panel min-h-0 overflow-hidden rounded-2xl p-2">
+          {mobilePane === "feed" ? (
+            <MobileFeedPanel logs={feedEntries.length ? feedEntries : activeMap.allLogs} limit={7} />
+          ) : mobilePane === "map" ? (
+            <RadarPanel
+              mapName={activeMap.mapName}
+              markers={radarMarkers}
+              latestMarker={latestRadarMarker}
+              sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+              compact
+            />
+          ) : mobilePane === "econ" ? (
+            <MobileEconomyPanel economyData={economyData} latestRound={latestRound} teamA={match.teamA} teamB={match.teamB} timeoutsRemaining={match.timeoutsRemaining} />
+          ) : (
+            <MobileRoundContext
+              match={match}
+              latestRound={latestRound}
+              fallbackRound={activeMap.roundNumber}
+              currentPlaybackEvent={currentPlaybackEvent}
+              liveStatusLabel={liveStatusLabel}
+              playbackStepLabel={playbackStepLabel}
+            />
+          )}
+        </div>
+      </div>
+      <MobileCompactTeamColumn team={match.teamB} score={activeMap.score.teamB} side={teamBState.side} players={teamBPlayers} reverse />
+    </div>
+  );
+}
+
+function MobileRoundContext({
+  match,
+  latestRound,
+  fallbackRound,
+  currentPlaybackEvent = null,
+  liveStatusLabel = null,
+  playbackStepLabel = null,
+}) {
+  if (!latestRound) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border px-4 text-center text-xs text-muted">
+        Waiting for round {fallbackRound}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[auto_auto_1fr] gap-2">
+      <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-display text-xl text-text">{latestRound.strategy}</div>
+            <div className="truncate text-[11px] text-muted">
+              {currentPlaybackEvent?.label ??
+                `${latestRound.winnerKey === "teamA" ? match.teamA.tag : match.teamB.tag} win by ${reasonLabel(latestRound.reason)}`}
+            </div>
+          </div>
+          <div className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted">
+            {liveStatusLabel ? `${liveStatusLabel}${playbackStepLabel ? ` · ${playbackStepLabel}` : ""}` : latestRound.displayRound}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-xl border border-border bg-surface/80 px-2.5 py-2">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-muted">{match.teamA.tag}</div>
+          <div className="mt-1 text-xs text-text">{roundTypeLabel(latestRound.roundType.teamA)}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-surface/80 px-2.5 py-2">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-muted">Bomb</div>
+          <div className="mt-1 text-xs text-text">{latestRound.bombPlanted ? latestRound.plantSite ?? "Planted" : "No plant"}</div>
+        </div>
+        <div className="rounded-xl border border-border bg-surface/80 px-2.5 py-2">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-muted">{match.teamB.tag}</div>
+          <div className="mt-1 text-xs text-text">{roundTypeLabel(latestRound.roundType.teamB)}</div>
+        </div>
+      </div>
+      <div className="grid min-h-0 grid-cols-2 gap-2">
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-muted">Top {match.teamA.tag}</div>
+          <div className="mt-1 truncate font-display text-lg text-text">{latestRound.spectatorLeaders.teamA.nickname}</div>
+          <div className="numbers text-sm" style={{ color: getRatingColor(latestRound.spectatorLeaders.teamA.rating) }}>
+            {latestRound.spectatorLeaders.teamA.rating}
+          </div>
+          <div className="mt-1 numbers text-[11px] text-muted">{formatMoney(latestRound.economy.teamATotalMoney)}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-muted">Top {match.teamB.tag}</div>
+          <div className="mt-1 truncate font-display text-lg text-text">{latestRound.spectatorLeaders.teamB.nickname}</div>
+          <div className="numbers text-sm" style={{ color: getRatingColor(latestRound.spectatorLeaders.teamB.rating) }}>
+            {latestRound.spectatorLeaders.teamB.rating}
+          </div>
+          <div className="mt-1 numbers text-[11px] text-muted">{formatMoney(latestRound.economy.teamBTotalMoney)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileFeedPanel({ logs, limit = 7 }) {
+  return (
+    <div className="scrollbar-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+      {logs.slice(0, limit).map((log) => (
+        <div key={log.id} className="rounded-xl border border-border bg-card/60 px-2.5 py-2">
+          <div className="numbers text-[10px] text-accent">[{log.clock}] R{log.roundNumber}</div>
+          <div className="mt-1 text-[11px] leading-4 text-text">{log.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MobileEconomyPanel({ economyData, latestRound, teamA, teamB, timeoutsRemaining }) {
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-muted">{teamA.tag} Bank</div>
+          <div className="mt-1 numbers text-sm text-accent">{formatMoney(latestRound?.economy.teamATotalMoney ?? 0)}</div>
+          <div className="mt-1 text-[10px] text-muted">TO {timeoutsRemaining.teamA}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-2.5">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-muted">{teamB.tag} Bank</div>
+          <div className="mt-1 numbers text-sm text-sky-300">{formatMoney(latestRound?.economy.teamBTotalMoney ?? 0)}</div>
+          <div className="mt-1 text-[10px] text-muted">TO {timeoutsRemaining.teamB}</div>
+        </div>
+      </div>
+      <div className="min-h-0 rounded-2xl border border-border bg-card/60 p-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={economyData}>
+            <CartesianGrid stroke="#1f232c" strokeDasharray="3 3" />
+            <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fill: "#6b7280", fontSize: 10 }} tickLine={false} axisLine={false} width={34} />
+            <Tooltip
+              contentStyle={{
+                background: "#111318",
+                border: "1px solid #2a2d36",
+                borderRadius: 12,
+                color: "#e8eaf0",
+              }}
+            />
+            <Line
+              type="monotone"
+              dataKey="teamA"
+              stroke="#f5a623"
+              strokeWidth={2.2}
+              dot={economyData.length <= 2 ? { r: 3, fill: "#f5a623", strokeWidth: 0 } : false}
+            />
+            <Line
+              type="monotone"
+              dataKey="teamB"
+              stroke="#5b8dd9"
+              strokeWidth={2.2}
+              dot={economyData.length <= 2 ? { r: 3, fill: "#5b8dd9", strokeWidth: 0 } : false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function MobileCompactTeamColumn({ team, score, side, players, reverse = false }) {
+  const tone = sideToneClasses(side);
+
+  return (
+    <section className="panel page-enter grid h-full min-h-0 grid-rows-[42px_repeat(5,minmax(0,1fr))] gap-1 overflow-hidden rounded-none border-y-0 p-1">
+      <div className={classNames("flex items-center justify-between rounded-xl border px-2 py-1.5", tone.border, tone.bg, reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="truncate font-display text-sm text-text">{team.tag}</div>
+          <div className={classNames("text-[9px] uppercase tracking-[0.16em]", tone.text)}>{side}</div>
+        </div>
+        <div className="numbers text-2xl text-text">{score}</div>
+      </div>
+      {players.map((player) => (
+        <MobileCompactPlayerCard key={player.id} player={player} side={side} reverse={reverse} />
+      ))}
+    </section>
+  );
+}
+
+function MobileCompactPlayerCard({ player, side, reverse = false }) {
+  const tone = sideToneClasses(side);
+
+  return (
+    <div className={classNames("rounded-lg border px-1.5 py-1", player.alive ? tone.border : "border-border bg-surface/60 opacity-70")}>
+      <div className={classNames("flex items-center justify-between gap-1", reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="truncate font-display text-[12px] text-text">{player.nickname}</div>
+          <div className="numbers text-[10px] text-muted">{player.kills}/{player.deaths}/{player.assists}</div>
+        </div>
+        <div className={classNames("shrink-0 rounded-md px-1 py-0.5 text-[9px] font-semibold", weaponBadgeClasses(player.weaponType))}>
+          [{player.weaponLabel}]
+        </div>
+      </div>
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface">
+        <div className={classNames("h-full rounded-full", tone.bar)} style={{ width: `${player.alive ? player.hp : 0}%` }} />
+      </div>
+      <div className={classNames("mt-1 flex items-center justify-between gap-1 text-[10px]", reverse && "flex-row-reverse")}>
+        <span className="text-muted">{player.alive ? `${player.hp} HP` : "OUT"}</span>
+        <span style={{ color: getRatingColor(player.rating) }} className="numbers">{player.rating}</span>
+      </div>
+    </div>
+  );
+}
+
+function sideToneClasses(side) {
+  return side === "CT"
+    ? {
+        border: "border-sky-500/25",
+        bg: "bg-sky-500/10",
+        text: "text-sky-300",
+        bar: "bg-sky-400",
+      }
+    : {
+        border: "border-accent/25",
+        bg: "bg-accent/10",
+        text: "text-accent",
+        bar: "bg-accent",
+      };
+}
+
+function shortRoleLabel(role) {
+  switch (role) {
+    case "Entry Fragger":
+      return "ENTRY";
+    case "AWPer":
+      return "AWP";
+    case "Lurker":
+      return "LURK";
+    case "Support":
+      return "SUP";
+    case "IGL":
+      return "IGL";
+    default:
+      return role.toUpperCase();
+  }
+}
+
+function roundTypeLabel(value) {
+  switch (value) {
+    case "antiEco":
+      return "anti";
+    case "full":
+      return "full";
+    case "force":
+      return "force";
+    case "eco":
+      return "eco";
+    case "pistol":
+      return "pistol";
+    default:
+      return value ?? "n/a";
+  }
+}
+
+function weaponBadgeClasses(weaponType) {
+  if (weaponType === "rifle") {
+    return "bg-accent/15 text-accent";
+  }
+
+  if (weaponType === "awp") {
+    return "bg-teal-500/15 text-teal-300";
+  }
+
+  if (weaponType === "smg") {
+    return "bg-emerald-500/15 text-emerald-300";
+  }
+
+  return "bg-white/10 text-white";
+}
+
+function formBarTone(value) {
+  if (value == null) {
+    return "bg-white/8";
+  }
+
+  if (value >= 2) {
+    return "bg-emerald-400";
+  }
+
+  if (value >= 1.2) {
+    return "bg-accent";
+  }
+
+  if (value >= 0.7) {
+    return "bg-sky-400";
+  }
+
+  return "bg-red-400";
+}
+
+function PlayerFormStrip({ series = [], reverse = false, compact = false }) {
+  const averageValue = series.some((value) => value != null) ? averageForm(series) : null;
+
+  return (
+    <div className={classNames("mt-2 flex items-center justify-between gap-3", reverse && "flex-row-reverse")}>
+      <div className="flex items-end gap-1">
+        {series.map((value, index) => (
+          <div
+            key={`${index}_${value ?? "empty"}`}
+            className={classNames("w-2 rounded-full transition-all", formBarTone(value))}
+            style={{ height: `${value == null ? 5 : clamp(6 + value * 8, 6, compact ? 18 : 24)}px` }}
+          />
+        ))}
+      </div>
+      <div className="numbers text-[10px] uppercase tracking-[0.16em] text-muted">
+        Form {averageValue != null ? averageValue : "--"}
+      </div>
+    </div>
+  );
+}
+
+function BroadcastTeamColumn({ team, score, side, players, coach, timeoutsRemaining, reverse = false }) {
+  const tone = sideToneClasses(side);
+  const totalMoney = players.reduce((sum, player) => sum + player.money, 0);
+
+  return (
+    <section className="panel page-enter flex h-full min-h-0 flex-col overflow-hidden rounded-2xl p-3">
+      <div className={classNames("rounded-2xl border px-4 py-3", tone.border, tone.bg)}>
+        <div className={classNames("flex items-center justify-between gap-3", reverse && "flex-row-reverse text-right")}>
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-border bg-surface">
+            {renderLogo(team.logo, team.tag.slice(0, 1))}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-display text-3xl text-text">{team.tag}</div>
+            <div className={classNames("text-[11px] uppercase tracking-[0.22em]", tone.text)}>{side}-Side</div>
+          </div>
+          <div className={classNames("shrink-0 text-right", reverse && "text-left")}>
+            <div className="numbers text-4xl text-text">{score}</div>
+            <div className="text-[11px] uppercase tracking-[0.2em] text-muted">TO {timeoutsRemaining}</div>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="rounded-xl border border-border bg-surface/80 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted">Bank</div>
+            <div className="mt-1 numbers text-sm text-text">{formatMoney(totalMoney)}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-surface/80 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted">Coach</div>
+            <div className="mt-1 truncate text-sm text-text">{coach.nickname}</div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 grid min-h-0 flex-1 grid-rows-5 gap-2">
+        {players.map((player) => (
+          <BroadcastPlayerCard key={player.id} player={player} side={side} reverse={reverse} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BroadcastPlayerCard({ player, side, reverse = false }) {
+  const tone = sideToneClasses(side);
+
+  return (
+    <div
+      className={classNames(
+        "flex min-h-0 flex-col rounded-2xl border px-3 py-2.5",
+        player.alive ? classNames(tone.border, "bg-card/75") : "border-border bg-surface/60 opacity-70"
+      )}
+    >
+      <div className={classNames("flex items-start justify-between gap-2", reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="truncate font-display text-xl text-text">{player.nickname}</div>
+            <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-muted">
+              {shortRoleLabel(player.role)}
+            </span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+            <span>HP {player.alive ? player.hp : "OUT"}</span>
+            <span>Armor {player.armor ? (player.helmet ? "H+K" : "K") : "No"}</span>
+            <span>Util {player.utilityCount}</span>
+          </div>
+        </div>
+        <div className={classNames("shrink-0 text-right", reverse && "text-left")}>
+          <div className={classNames("rounded-lg px-2.5 py-1 text-[11px] font-semibold", weaponBadgeClasses(player.weaponType))}>
+            [{player.weaponLabel}]
+          </div>
+          <div className="mt-2 numbers text-xs text-text">{formatMoney(player.money)}</div>
+        </div>
+      </div>
+      <div className="mt-2 flex-1">
+        <div className="h-2 overflow-hidden rounded-full bg-surface">
+          <div
+            className={classNames("h-full rounded-full transition-all", tone.bar)}
+            style={{ width: `${player.alive ? player.hp : 0}%` }}
+          />
+        </div>
+        <PlayerFormStrip series={player.formSeries} reverse={reverse} />
+      </div>
+      <div className={classNames("mt-2 flex items-center justify-between gap-3 text-[11px]", reverse && "flex-row-reverse")}>
+        <span className="numbers text-text">
+          {player.kills}/{player.deaths}/{player.assists}
+        </span>
+        <span className="numbers text-muted">{player.alive ? `${player.hp} HP` : "Eliminated"}</span>
+        <span style={{ color: getRatingColor(player.rating) }} className="numbers text-text">
+          {player.rating}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function LeaderCard({ title, nickname, rating, side }) {
+  const tone = sideToneClasses(side);
+
+  return (
+    <div className={classNames("rounded-2xl border p-3", tone.border, "bg-card/60")}>
+      <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Top Rating {title}</div>
+      <div className="mt-1 font-display text-2xl text-text">{nickname}</div>
+      <div className="numbers text-lg" style={{ color: getRatingColor(rating) }}>{rating}</div>
+    </div>
+  );
+}
+
+function WinExpectancyCard({ currentExpectancyPoint, expectancySeries = [], teamA, teamB }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card/60 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-muted">Round Win Expectancy</div>
+        <div className="numbers text-xs text-muted">
+          {expectancySeries.length ? `${expectancySeries.length} nodes` : "Live"}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-muted">{teamA.tag}</div>
+          <div className="mt-1 numbers text-2xl text-accent">{currentExpectancyPoint?.teamA ?? 50}%</div>
+        </div>
+        <div className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-muted">{teamB.tag}</div>
+          <div className="mt-1 numbers text-2xl text-sky-300">{currentExpectancyPoint?.teamB ?? 50}%</div>
+        </div>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface">
+        <div className="flex h-full">
+          <div className="bg-accent" style={{ width: `${currentExpectancyPoint?.teamA ?? 50}%` }} />
+          <div className="bg-sky-400" style={{ width: `${currentExpectancyPoint?.teamB ?? 50}%` }} />
+        </div>
+      </div>
+      <div className="mt-3 h-[110px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={expectancySeries}>
+            <CartesianGrid stroke="rgba(255,255,255,0.05)" />
+            <XAxis dataKey="clock" hide />
+            <YAxis domain={[0, 100]} hide />
+            <Line type="monotone" dataKey="teamA" stroke="#f5a623" strokeWidth={2.2} dot={false} />
+            <Line type="monotone" dataKey="teamB" stroke="#5b8dd9" strokeWidth={2.2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function KillFeedPanel({
+  entries = [],
+  title = "Kill Feed",
+  subtitle = "Latest frags, weapons, and side losses.",
+  limit = 8,
+  compact = false,
+  emphasized = false,
+  className = "",
+}) {
+  const visibleEntries = entries.slice(0, limit);
+  const leadEntry = emphasized ? visibleEntries[0] ?? null : null;
+  const tailEntries = emphasized ? visibleEntries.slice(1) : visibleEntries;
+
+  return (
+    <Panel title={title} subtitle={subtitle} className={classNames("flex min-h-0 flex-col overflow-hidden p-3", className)}>
+      <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        {!visibleEntries.length && (
+          <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted">
+            Waiting for the first frag.
+          </div>
+        )}
+        {leadEntry && (
+          <div className="rounded-2xl border border-accent/35 bg-accent/10 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="numbers text-sm text-accent">[{leadEntry.clock}]</div>
+              <div
+                className={classNames(
+                  "rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em]",
+                  leadEntry.victimSide === "CT" ? "bg-sky-500/10 text-sky-300" : "bg-accent/10 text-accent"
+                )}
+              >
+                {leadEntry.victimSide === "CT" ? "CT down" : "T down"}
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-base leading-6 text-text">
+              <span className="font-display text-2xl text-text">{leadEntry.killerNickname ?? "Unknown"}</span>
+              <span className="rounded-lg border border-accent/30 bg-surface/80 px-2 py-1 text-xs uppercase tracking-[0.16em] text-accent">
+                {leadEntry.weaponLabel ?? "UTIL"}
+              </span>
+              <span className="text-muted">vs</span>
+              <span className="font-display text-2xl text-text">{leadEntry.victimNickname ?? "Unknown"}</span>
+            </div>
+            <div className="mt-2 text-xs uppercase tracking-[0.16em] text-muted">
+              {leadEntry.zoneLabel ?? leadEntry.zone ?? leadEntry.site ?? "mid"}
+            </div>
+          </div>
+        )}
+        {tailEntries.map((entry) => (
+          <div key={entry.id} className={classNames("rounded-xl border border-border bg-card/60", compact ? "px-3 py-2" : "px-3 py-2.5")}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="numbers text-[11px] text-accent">[{entry.clock}]</div>
+              <div
+                className={classNames(
+                  "rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]",
+                  entry.victimSide === "CT" ? "bg-sky-500/10 text-sky-300" : "bg-accent/10 text-accent"
+                )}
+              >
+                {entry.victimSide === "CT" ? "CT down" : "T down"}
+              </div>
+            </div>
+            <div className={classNames("mt-1 text-text", compact ? "text-sm leading-5" : "text-[15px] leading-6")}>
+              <span className="font-semibold text-text">{entry.killerNickname ?? "Unknown"}</span>{" "}
+              <span className="text-accent">[{entry.weaponLabel ?? "UTIL"}]</span>{" "}
+              <span className="text-muted">vs</span>{" "}
+              <span className="font-semibold text-text">{entry.victimNickname ?? "Unknown"}</span>
+            </div>
+            <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted">
+              {entry.zoneLabel ?? entry.zone ?? entry.site ?? "mid"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function ObserverTimelinePanel({
+  summary,
+  currentFrameIndex = 0,
+  onFrameChange = null,
+  title = "Observer Timeline",
+  subtitle = "Key checkpoints through the round.",
+}) {
+  const events = (summary?.timeline ?? []).filter((entry) => entry.snapshot);
+  const maxIndex = Math.max(0, events.length - 1);
+  const safeIndex = Math.max(0, Math.min(maxIndex, currentFrameIndex));
+  const activeEvent = events[safeIndex] ?? null;
+
+  return (
+    <Panel title={title} subtitle={subtitle} className="overflow-hidden p-3">
+      {events.length ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 text-xs text-muted">
+            <span>{activeEvent?.clock ?? "1:55"}</span>
+            <span className="numbers text-text">
+              {safeIndex + 1}/{events.length}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={maxIndex}
+            value={safeIndex}
+            onChange={(event) => onFrameChange?.(Number(event.target.value))}
+            disabled={!onFrameChange}
+            className="w-full accent-[#f5a623]"
+          />
+          <div className="scrollbar-thin flex gap-2 overflow-x-auto pb-1">
+            {events.map((entry, index) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => onFrameChange?.(index)}
+                disabled={!onFrameChange}
+                className={classNames(
+                  "min-w-[160px] rounded-xl border px-3 py-2 text-left transition",
+                  index === safeIndex ? "border-accent bg-accent/10" : "border-border bg-card/60"
+                )}
+              >
+                <div className="numbers text-[11px] text-accent">[{entry.clock}]</div>
+                <div className="mt-1 line-clamp-2 text-sm text-text">{entry.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted">
+          Timeline becomes available once the round has event snapshots.
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function RadarImageStage({
+  src,
+  alt,
+  mapName,
+  level = "upper",
+  markers,
+  heatClusters = [],
+  sideLookup,
+  compact = false,
+  expanded = false,
+  label = "Upper",
+}) {
+  const areaRef = useRef(null);
+  const viewBox = getRadarViewBox(mapName, level);
+  const [imageFrame, setImageFrame] = useState({ left: 0, top: 0, width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const areaNode = areaRef.current;
+    if (!areaNode || typeof window === "undefined") {
+      return undefined;
+    }
+
+    const syncFrame = () => {
+      const areaRect = areaNode.getBoundingClientRect();
+      const aspectRatio = viewBox.width / viewBox.height;
+      let width = areaRect.width;
+      let height = width / aspectRatio;
+
+      if (height > areaRect.height) {
+        height = areaRect.height;
+        width = height * aspectRatio;
+      }
+
+      setImageFrame({
+        left: (areaRect.width - width) / 2,
+        top: (areaRect.height - height) / 2,
+        width,
+        height,
+      });
+    };
+
+    syncFrame();
+    const observer = new ResizeObserver(syncFrame);
+    observer.observe(areaNode);
+    window.addEventListener("resize", syncFrame);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncFrame);
+    };
+  }, [compact, expanded, markers.length, viewBox.height, viewBox.width]);
+
+  return (
+    <div ref={areaRef} className="relative h-full w-full">
+      <div
+        className="absolute overflow-hidden rounded-xl"
+        style={{
+          left: imageFrame.left,
+          top: imageFrame.top,
+          width: imageFrame.width,
+          height: imageFrame.height,
+        }}
+      >
+        <img
+          src={src}
+          alt={alt}
+          draggable="false"
+          className="pointer-events-none absolute select-none"
+          style={{
+            left: `${(-viewBox.left / viewBox.width) * 100}%`,
+            top: `${(-viewBox.top / viewBox.height) * 100}%`,
+            width: `${(1 / viewBox.width) * 100}%`,
+            height: `${(1 / viewBox.height) * 100}%`,
+            maxWidth: "none",
+          }}
+        />
+        {heatClusters.map((cluster) => (
+          <RadarHeatmapMarker
+            key={cluster.id}
+            cluster={cluster}
+            compact={compact}
+            expanded={expanded}
+            imageFrame={{ left: 0, top: 0, width: imageFrame.width, height: imageFrame.height }}
+            viewBox={viewBox}
+          />
+        ))}
+        {markers.map((marker) => (
+          <RadarDeathMarker
+            key={marker.id}
+            marker={marker}
+            victimSide={marker.victimSide ?? sideLookup[marker.victimTeamKey]}
+            compact={compact}
+            expanded={expanded}
+            imageFrame={{ left: 0, top: 0, width: imageFrame.width, height: imageFrame.height }}
+            viewBox={viewBox}
+          />
+        ))}
+      </div>
+      <div className="pointer-events-none absolute left-3 top-3 rounded-full border border-border bg-surface/80 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-muted">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function RadarPanel({
+  mapName,
+  markers,
+  latestMarker,
+  sideLookup,
+  compact = false,
+  expanded = false,
+  showSidebar = !compact,
+  showSummary = true,
+}) {
+  const assets = RADAR_ASSETS[mapName];
+  const upperMarkers = markers.filter((marker) => marker.level !== "lower");
+  const lowerMarkers = markers.filter((marker) => marker.level === "lower");
+  const compactStage = compact;
+  const splitLevels = Boolean(assets?.lower);
+
+  if (!assets?.upper) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border px-4 text-center text-sm text-muted">
+        Radar asset is missing for {mapName}.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={classNames(
+        "grid h-full min-h-0 gap-3",
+        compact || !showSidebar
+          ? showSummary
+            ? "grid-cols-1 grid-rows-[minmax(0,1fr)_auto]"
+            : "grid-cols-1"
+          : expanded
+            ? "grid-cols-[minmax(0,1fr)_260px]"
+            : "grid-cols-[minmax(0,1fr)_176px]"
+      )}
+    >
+      <div className="flex min-h-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-[#050608] p-3">
+        <div
+          className={classNames(
+            "grid h-full w-full min-h-0 gap-3",
+            splitLevels
+              ? expanded
+                ? "grid-cols-[minmax(0,1fr)_300px]"
+                : compactStage
+                  ? "grid-cols-[minmax(0,1fr)_140px]"
+                  : "grid-cols-[minmax(0,1fr)_180px]"
+              : "grid-cols-1",
+            compactStage ? "max-w-[560px]" : "",
+            expanded ? "max-h-[78vh]" : ""
+          )}
+        >
+          <div className="min-h-0 overflow-hidden rounded-xl">
+            <RadarImageStage
+              src={assets.upper}
+              alt={`${mapName} radar`}
+              mapName={mapName}
+              level="upper"
+              markers={upperMarkers}
+              sideLookup={sideLookup}
+              compact={compact}
+              expanded={expanded}
+              label="Upper"
+            />
+          </div>
+          {splitLevels && (
+            <div
+              className={classNames(
+                "overflow-hidden rounded-xl border border-border bg-[#050608]",
+                expanded
+                  ? "self-center aspect-[0.82/1] h-auto max-h-[340px]"
+                  : compactStage
+                    ? "self-center aspect-[0.82/1] h-auto max-h-[170px]"
+                    : "self-center aspect-[0.82/1] h-auto max-h-[210px]"
+              )}
+            >
+              <RadarImageStage
+                src={assets.lower}
+                alt={`${mapName} lower radar`}
+                mapName={mapName}
+                level="lower"
+                markers={lowerMarkers}
+                sideLookup={sideLookup}
+                compact
+                expanded={expanded}
+                label="Lower"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+      {(compact || !showSidebar) && showSummary && (
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted">Last Frag</div>
+            <div className="numbers text-xs text-accent">{latestMarker?.clock ?? "Waiting"}</div>
+          </div>
+          <div className="mt-1 text-sm leading-5 text-text">
+            {latestMarker?.label ?? "Kill markers will stay on the radar during live playback."}
+          </div>
+        </div>
+      )}
+      {!compact && showSidebar && (
+      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Last Frag</div>
+          <div className="mt-1 font-display text-2xl text-text">{latestMarker?.clock ?? "Waiting"}</div>
+          <div className="mt-2 text-sm leading-5 text-muted">
+            {latestMarker?.label ?? "Kill markers appear here through the round playback."}
+          </div>
+        </div>
+        <div className="min-h-0 rounded-2xl border border-border bg-card/60 p-3">
+          <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted">
+            <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-accent">T Frag</span>
+            <span className="rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-sky-300">CT Frag</span>
+          </div>
+          <div className="scrollbar-thin h-full space-y-2 overflow-y-auto pr-1">
+            {markers.length ? (
+              [...markers].reverse().map((marker) => (
+                <div key={`${marker.id}_line`} className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="numbers text-xs text-accent">{marker.clock}</div>
+                    <div
+                      className={classNames(
+                        "rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]",
+                        marker.victimSide === "CT" ? "bg-sky-500/10 text-sky-300" : "bg-accent/10 text-accent"
+                      )}
+                    >
+                      {marker.victimSide === "CT" ? "CT down" : "T down"}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-sm text-text">{marker.zoneLabel ?? marker.zone ?? marker.site ?? "unknown"}</div>
+                </div>
+              ))
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted">
+                No deaths yet on this round.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
+function RadarDeathMarker({ marker, victimSide, compact = false, expanded = false, imageFrame, viewBox }) {
+  const victimTone =
+    victimSide === "CT"
+      ? "text-sky-300 drop-shadow-[0_0_10px_rgba(91,141,217,0.75)]"
+      : "text-accent drop-shadow-[0_0_10px_rgba(245,166,35,0.75)]";
+  const width = imageFrame?.width ?? 0;
+  const height = imageFrame?.height ?? 0;
+  if (!width || !height) {
+    return null;
+  }
+  const rawNormalizedX = (marker.x - viewBox.left) / viewBox.width;
+  const rawNormalizedY = (marker.y - viewBox.top) / viewBox.height;
+  if (rawNormalizedX < 0 || rawNormalizedX > 1 || rawNormalizedY < 0 || rawNormalizedY > 1) {
+    return null;
+  }
+  const normalizedX = clamp(rawNormalizedX, 0.02, 0.98);
+  const normalizedY = clamp(rawNormalizedY, 0.02, 0.98);
+
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        left: imageFrame.left + normalizedX * width,
+        top: imageFrame.top + normalizedY * height,
+        transform: "translate(-50%, -50%)",
+      }}
+      title={marker.label}
+    >
+      <div
+        className={classNames(
+          "rounded-full border border-white/10 bg-black/45 backdrop-blur-sm",
+          marker.recent ? "scale-110" : "opacity-80"
+        )}
+      >
+        <X
+          size={expanded ? (marker.recent ? 28 : 24) : compact ? 15 : marker.recent ? 20 : 17}
+          strokeWidth={expanded ? 3.4 : compact ? 2.7 : 3.1}
+          className={victimTone}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RadarHeatmapMarker({ cluster, compact = false, expanded = false, imageFrame, viewBox }) {
+  const width = imageFrame?.width ?? 0;
+  const height = imageFrame?.height ?? 0;
+  if (!width || !height) {
+    return null;
+  }
+
+  const rawNormalizedX = (cluster.x - viewBox.left) / viewBox.width;
+  const rawNormalizedY = (cluster.y - viewBox.top) / viewBox.height;
+  if (rawNormalizedX < 0 || rawNormalizedX > 1 || rawNormalizedY < 0 || rawNormalizedY > 1) {
+    return null;
+  }
+  const normalizedX = clamp(rawNormalizedX, 0.02, 0.98);
+  const normalizedY = clamp(rawNormalizedY, 0.02, 0.98);
+  const size = expanded ? clamp(18 + cluster.count * 5, 18, 54) : compact ? clamp(12 + cluster.count * 4, 12, 32) : clamp(16 + cluster.count * 4, 16, 42);
+  const tone =
+    cluster.side === "CT"
+      ? "bg-sky-400/35 shadow-[0_0_24px_rgba(91,141,217,0.55)]"
+      : cluster.side === "T"
+        ? "bg-accent/35 shadow-[0_0_24px_rgba(245,166,35,0.55)]"
+        : "bg-white/20 shadow-[0_0_18px_rgba(255,255,255,0.25)]";
+
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        left: imageFrame.left + normalizedX * width,
+        top: imageFrame.top + normalizedY * height,
+        transform: "translate(-50%, -50%)",
+      }}
+      title={cluster.title}
+    >
+      <div className={classNames("rounded-full border border-white/10 backdrop-blur-sm", tone)} style={{ width: size, height: size }} />
+    </div>
+  );
+}
+
+function RadarExpandedModal({ mapName, markers, latestMarker, sideLookup, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6 backdrop-blur-md">
+      <div className="panel flex h-[92vh] w-[min(1520px,96vw)] flex-col rounded-3xl p-5">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <div className="text-xs uppercase tracking-[0.22em] text-accent">Expanded Radar</div>
+            <div className="font-display text-3xl text-text">{mapName}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-2xl border border-border bg-card/70 p-3 text-muted transition hover:border-accent/40 hover:text-text"
+            aria-label="Close radar"
+          >
+            <X size={20} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">
+          <RadarPanel
+            mapName={mapName}
+            markers={markers}
+            latestMarker={latestMarker}
+            sideLookup={sideLookup}
+            expanded
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RadarHeatmapPanel({ mapName, clusters, sideFilter = "all" }) {
+  const assets = RADAR_ASSETS[mapName];
+  const upperClusters = clusters.filter((cluster) => cluster.level !== "lower");
+  const lowerClusters = clusters.filter((cluster) => cluster.level === "lower");
+  const splitLevels = Boolean(assets?.lower);
+
+  if (!assets?.upper) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border px-4 text-center text-sm text-muted">
+        Radar asset is missing for {mapName}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_220px] gap-3">
+      <div className="flex min-h-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-[#050608] p-3">
+        <div className={classNames("grid h-full w-full min-h-0 gap-3", splitLevels ? "grid-cols-[minmax(0,1fr)_220px]" : "grid-cols-1")}>
+          <div className="min-h-0 overflow-hidden rounded-xl">
+            <RadarImageStage
+              src={assets.upper}
+              alt={`${mapName} heatmap`}
+              mapName={mapName}
+              level="upper"
+              markers={[]}
+              heatClusters={upperClusters}
+              sideLookup={{}}
+              expanded
+              label="Upper"
+            />
+          </div>
+          {splitLevels && (
+            <div className="min-h-0 overflow-hidden rounded-xl border border-border bg-[#050608]">
+              <RadarImageStage
+                src={assets.lower}
+                alt={`${mapName} lower heatmap`}
+                mapName={mapName}
+                level="lower"
+                markers={[]}
+                heatClusters={lowerClusters}
+                sideLookup={{}}
+                compact
+                expanded
+                label="Lower"
+              />
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
+        <div className="rounded-2xl border border-border bg-card/60 px-3 py-3">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Heatmap Filter</div>
+          <div className="mt-2 text-sm text-text">{sideFilter === "all" ? "All deaths" : sideFilter === "CT" ? "CT deaths" : "T deaths"}</div>
+        </div>
+        <div className="min-h-0 rounded-2xl border border-border bg-card/60 p-3">
+          <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-muted">Hot Zones</div>
+          <div className="scrollbar-thin h-full space-y-2 overflow-y-auto pr-1">
+            {clusters.length ? (
+              clusters.slice(0, 10).map((cluster) => (
+                <div key={cluster.id} className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="truncate text-sm text-text">{cluster.zone}</div>
+                    <div className="numbers text-xs text-accent">{cluster.count}</div>
+                  </div>
+                  <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted">
+                    {cluster.side === "CT" ? "CT deaths" : cluster.side === "T" ? "T deaths" : "mixed"}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-border px-4 text-center text-sm text-muted">
+                No kill clusters available for this filter.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultsModeSwitch({ mode, onChange }) {
+  const modes = [
+    { id: "overview", label: "Overview" },
+    { id: "analyst", label: "Analyst Desk" },
+    { id: "heatmaps", label: "Heatmaps" },
+  ];
+
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-border bg-card/70 p-1">
+      {modes.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          onClick={() => onChange(entry.id)}
+          className={classNames(
+            "rounded-lg border px-4 py-2 text-xs uppercase tracking-[0.16em] transition",
+            mode === entry.id ? "border-accent bg-accent/10 text-accent" : "border-transparent text-muted hover:text-text"
+          )}
+        >
+          {entry.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PlayerFormBoard({ map }) {
+  const formLookup = useMemo(() => buildPlayerFormLookup(map.rounds), [map.rounds]);
+  const rows = useMemo(
+    () =>
+      [...map.teamAPlayers, ...map.teamBPlayers]
+        .map((player) => ({
+          id: player.id,
+          nickname: player.nickname,
+          teamTag: player.teamTag ?? "",
+          role: player.role,
+          formSeries: formLookup[player.id] ?? [null, null, null, null, null],
+          formAverage: averageForm(formLookup[player.id] ?? []),
+        }))
+        .sort((left, right) => right.formAverage - left.formAverage)
+        .slice(0, 10),
+    [formLookup, map.teamAPlayers, map.teamBPlayers]
+  );
+
+  return (
+    <Panel title="Player Form" subtitle="Last five rounds on the selected map." className="overflow-hidden p-3">
+      <div className="space-y-2">
+        {rows.map((player) => (
+          <div key={player.id} className="rounded-xl border border-border bg-card/60 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-display text-xl text-text">{player.nickname}</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-muted">{player.role}</div>
+              </div>
+              <div className="numbers text-sm text-accent">{player.formAverage}</div>
+            </div>
+            <PlayerFormStrip series={player.formSeries} />
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function AnalystDeskView({ results, mobile = false }) {
+  const analyst = useMemo(() => buildAnalystDesk(results), [results]);
+  const [selectedMapId, setSelectedMapId] = useState(results.maps[0]?.id ?? null);
+  const selectedMap = results.maps.find((map) => map.id === selectedMapId) ?? results.maps[0];
+  const [selectedRoundNumber, setSelectedRoundNumber] = useState(selectedMap?.rounds.at(-1)?.roundNumber ?? null);
+
+  useEffect(() => {
+    setSelectedRoundNumber(selectedMap?.rounds.at(-1)?.roundNumber ?? null);
+  }, [selectedMap?.id]);
+
+  const selectedRound =
+    selectedMap?.rounds.find((roundSummary) => roundSummary.roundNumber === selectedRoundNumber) ??
+    selectedMap?.rounds.at(-1) ??
+    null;
+  const observerEvents = useMemo(
+    () => (selectedRound?.timeline ?? []).filter((entry) => entry.snapshot),
+    [selectedRound]
+  );
+  const [observerFrameIndex, setObserverFrameIndex] = useState(Math.max(0, observerEvents.length - 1));
+
+  useEffect(() => {
+    setObserverFrameIndex(Math.max(0, observerEvents.length - 1));
+  }, [selectedRound?.roundNumber, observerEvents.length]);
+
+  const activeObserverEvent = observerEvents[Math.max(0, Math.min(observerEvents.length - 1, observerFrameIndex))] ?? null;
+  const observerMarkers = useMemo(
+    () =>
+      buildRadarMarkers(
+        observerEvents.slice(0, Math.max(0, Math.min(observerEvents.length, observerFrameIndex + 1))),
+        selectedMap?.mapName ?? "Mirage"
+      ),
+    [observerEvents, observerFrameIndex, selectedMap?.mapName]
+  );
+  const observerLatestMarker = observerMarkers[observerMarkers.length - 1] ?? null;
+  const roundExpectancySeries = useMemo(
+    () => buildExpectancySeries(selectedRound, selectedMap?.mapName ?? "Mirage"),
+    [selectedRound, selectedMap?.mapName]
+  );
+  const observerExpectancy =
+    roundExpectancySeries[
+      Math.max(0, Math.min(roundExpectancySeries.length - 1, observerFrameIndex + 1))
+    ] ?? roundExpectancySeries[roundExpectancySeries.length - 1] ?? null;
+  const mapExpectancyCurve = useMemo(() => buildMapExpectancyCurve(selectedMap), [selectedMap]);
+  const mapSwings = useMemo(
+    () =>
+      selectedMap.rounds
+        .map((roundSummary) => buildRoundSwing(roundSummary, selectedMap.mapName))
+        .filter(Boolean)
+        .sort((left, right) => right.swing - left.swing)
+        .slice(0, 5),
+    [selectedMap]
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        {results.maps.map((map) => (
+          <button
+            key={map.id}
+            type="button"
+            onClick={() => setSelectedMapId(map.id)}
+            className={classNames(
+              "rounded-xl border px-4 py-2 text-sm transition",
+              selectedMap.id === map.id ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
+            )}
+          >
+            {map.mapName}
+          </button>
+        ))}
+      </div>
+      <div className={classNames("grid gap-3", mobile ? "grid-cols-1" : "grid-cols-4")}>
+        <div className="rounded-2xl border border-border bg-card/60 p-4">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Biggest Swing</div>
+          <div className="mt-2 font-display text-2xl text-text">
+            {analyst.biggestSwing ? `${analyst.biggestSwing.mapName} ${analyst.biggestSwing.displayRound}` : "n/a"}
+          </div>
+          <div className="mt-1 text-sm text-muted">{analyst.biggestSwing ? `${analyst.biggestSwing.swing}% expectancy swing` : "Waiting for played rounds."}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card/60 p-4">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Clutch Leader</div>
+          <div className="mt-2 font-display text-2xl text-text">{analyst.clutchLeader?.nickname ?? "n/a"}</div>
+          <div className="mt-1 text-sm text-muted">{analyst.clutchLeader ? `${analyst.clutchLeader.clutchesWon} clutches won` : "No clutches recorded."}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card/60 p-4">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Opening Edge</div>
+          <div className="mt-2 font-display text-2xl text-text">{analyst.entryLeader?.nickname ?? "n/a"}</div>
+          <div className="mt-1 text-sm text-muted">{analyst.entryLeader ? `${analyst.entryLeader.openingKills} opening kills` : "No opener data yet."}</div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card/60 p-4">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Pistol Conversion</div>
+          <div className="mt-2 font-display text-2xl text-text">
+            {analyst.pistolConversions.total ? `${Math.round((analyst.pistolConversions.converted / analyst.pistolConversions.total) * 100)}%` : "n/a"}
+          </div>
+          <div className="mt-1 text-sm text-muted">
+            {analyst.pistolConversions.total
+              ? `${analyst.pistolConversions.converted}/${analyst.pistolConversions.total} pistol follow-ups converted`
+              : "No pistols recorded."}
+          </div>
+        </div>
+      </div>
+      <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1.15fr_0.85fr]")}>
+        <div className="space-y-6">
+          <Panel title="Round Review" subtitle="Replay any played round from the selected map." className="overflow-hidden p-3">
+            <div className="mb-3 flex flex-wrap gap-2">
+              {[...selectedMap.rounds].reverse().slice(0, 15).map((roundSummary) => (
+                <button
+                  key={`${selectedMap.id}_${roundSummary.roundNumber}`}
+                  type="button"
+                  onClick={() => setSelectedRoundNumber(roundSummary.roundNumber)}
+                  className={classNames(
+                    "rounded-xl border px-3 py-1.5 text-xs uppercase tracking-[0.16em] transition",
+                    selectedRound?.roundNumber === roundSummary.roundNumber
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-border text-muted"
+                  )}
+                >
+                  {roundSummary.displayRound}
+                </button>
+              ))}
+            </div>
+            {selectedRound ? (
+              <div className="grid gap-3">
+                <RadarPanel
+                  mapName={selectedMap.mapName}
+                  markers={observerMarkers}
+                  latestMarker={observerLatestMarker}
+                  sideLookup={selectedRound.sides ?? { teamA: "CT", teamB: "T" }}
+                  showSidebar={false}
+                  showSummary={false}
+                />
+                <div className={classNames("grid gap-3", mobile ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_320px]")}>
+                  <ObserverTimelinePanel
+                    summary={selectedRound}
+                    currentFrameIndex={observerFrameIndex}
+                    onFrameChange={setObserverFrameIndex}
+                    title="Observer Timeline"
+                    subtitle="Scrub through the round event by event."
+                  />
+                  <div className="rounded-2xl border border-border bg-card/60 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Selected Event</div>
+                    <div className="mt-2 font-display text-2xl text-text">{activeObserverEvent?.clock ?? "1:55"}</div>
+                    <div className="mt-2 text-sm leading-6 text-text">{activeObserverEvent?.label ?? selectedRound.highlight ?? "Move the timeline to inspect the round."}</div>
+                    <div className="mt-4 rounded-xl border border-border bg-surface/70 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-muted">Round Win Expectancy</div>
+                      <div className="mt-1 numbers text-lg text-text">
+                        {results.teamA.tag} {observerExpectancy?.teamA ?? 50}% · {results.teamB.tag} {observerExpectancy?.teamB ?? 50}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted">
+                No played rounds available for review on this map yet.
+              </div>
+            )}
+          </Panel>
+          <PlayerFormBoard map={selectedMap} />
+        </div>
+        <div className="space-y-6">
+          <Panel title="Round Win Expectancy" subtitle="Pre-round expectation curve across the selected map." className="overflow-hidden p-3">
+            <div className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={mapExpectancyCurve}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                  <XAxis dataKey="label" stroke="#6b7280" tick={{ fill: "#6b7280", fontSize: 11 }} />
+                  <YAxis domain={[0, 100]} stroke="#6b7280" tick={{ fill: "#6b7280", fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#111318",
+                      border: "1px solid #2a2d36",
+                      borderRadius: 16,
+                      color: "#e8eaf0",
+                    }}
+                  />
+                  <Line type="monotone" dataKey="teamA" stroke="#f5a623" strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="teamB" stroke="#5b8dd9" strokeWidth={2.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {mapSwings.map((swing) => (
+                <div key={`${swing.mapName}_${swing.roundNumber}`} className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-display text-lg text-text">{swing.displayRound}</div>
+                    <div className="numbers text-sm text-accent">{swing.swing}%</div>
+                  </div>
+                  <div className="text-xs text-muted">{swing.mapName} · start {swing.start}% · finish {swing.finish}%</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MapHeatmapsView({ results, mobile = false }) {
+  const [selectedMapId, setSelectedMapId] = useState(results.maps[0]?.id ?? null);
+  const [sideFilter, setSideFilter] = useState("all");
+  const selectedMap = results.maps.find((map) => map.id === selectedMapId) ?? results.maps[0];
+  const heatClusters = useMemo(
+    () => buildHeatmapClusters(selectedMap, sideFilter === "all" ? "all" : sideFilter.toUpperCase()),
+    [selectedMap, sideFilter]
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        {results.maps.map((map) => (
+          <button
+            key={map.id}
+            type="button"
+            onClick={() => setSelectedMapId(map.id)}
+            className={classNames(
+              "rounded-xl border px-4 py-2 text-sm transition",
+              selectedMap.id === map.id ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
+            )}
+          >
+            {map.mapName}
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-2 rounded-xl border border-border bg-card/70 p-1">
+          {[
+            { id: "all", label: "All" },
+            { id: "ct", label: "CT Deaths" },
+            { id: "t", label: "T Deaths" },
+          ].map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => setSideFilter(filter.id)}
+              className={classNames(
+                "rounded-lg border px-3 py-1.5 text-xs uppercase tracking-[0.16em] transition",
+                sideFilter === filter.id ? "border-accent bg-accent/10 text-accent" : "border-transparent text-muted"
+              )}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Panel
+        title="Map Heatmaps"
+        subtitle="Aggregated death clusters on the selected map for review and analyst reads."
+      >
+        <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_320px]")}>
+          <RadarHeatmapPanel mapName={selectedMap.mapName} clusters={heatClusters} sideFilter={sideFilter === "all" ? "all" : sideFilter.toUpperCase()} />
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-border bg-card/60 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Heatmap Read</div>
+              <div className="mt-2 font-display text-2xl text-text">{selectedMap.mapName}</div>
+              <div className="mt-2 text-sm text-muted">
+                {heatClusters.length
+                  ? `${heatClusters[0].zone} is the hottest zone with ${heatClusters[0].count} deaths in the selected filter.`
+                  : "No deaths recorded for this filter."}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card/60 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Top Clusters</div>
+              <div className="mt-3 space-y-2">
+                {heatClusters.slice(0, 8).map((cluster) => (
+                  <div key={cluster.id} className="rounded-xl border border-border bg-surface/70 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm text-text">{cluster.zone}</div>
+                      <div className="numbers text-sm text-accent">{cluster.count}</div>
+                    </div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted">
+                      {cluster.side === "CT" ? "CT deaths" : cluster.side === "T" ? "T deaths" : "mixed"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function ArchiveFilters({ filters, onChange, options, mobile = false }) {
+  return (
+    <div className={classNames("mb-4 grid gap-3", mobile ? "grid-cols-1" : "grid-cols-4")}>
+      <div className="flex items-center gap-3 rounded-2xl border border-border bg-card/70 px-4 py-3">
+        <Search size={16} className="text-muted" />
+        <input
+          type="text"
+          placeholder="Search teams, tournaments, maps"
+          value={filters.search}
+          onChange={(event) => onChange("search", event.target.value)}
+          className="w-full bg-transparent text-sm text-text outline-none placeholder:text-muted"
+        />
+      </div>
+      <select value={filters.team} onChange={(event) => onChange("team", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+        <option value="all">All Teams</option>
+        {options.teams.map((team) => <option key={team} value={team}>{team}</option>)}
+      </select>
+      <select value={filters.tournament} onChange={(event) => onChange("tournament", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+        <option value="all">All Tournaments</option>
+        {options.tournaments.map((tournament) => <option key={tournament} value={tournament}>{tournament}</option>)}
+      </select>
+      <select value={filters.stage} onChange={(event) => onChange("stage", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+        <option value="all">All Stages</option>
+        {options.stages.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+      </select>
+      <select value={filters.eventType} onChange={(event) => onChange("eventType", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+        <option value="all">LAN + Online</option>
+        {options.eventTypes.map((eventType) => <option key={eventType} value={eventType}>{eventType}</option>)}
+      </select>
+      <select value={filters.map} onChange={(event) => onChange("map", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+        <option value="all">All Maps</option>
+        {options.maps.map((map) => <option key={map} value={map}>{map}</option>)}
+      </select>
+      <input type="date" value={filters.from} onChange={(event) => onChange("from", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text" />
+      <input type="date" value={filters.to} onChange={(event) => onChange("to", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text" />
+      <select value={filters.status} onChange={(event) => onChange("status", event.target.value)} className="rounded-2xl border border-border bg-card/70 px-4 py-3 text-sm text-text">
+        <option value="all">All Entries</option>
+        <option value="included">Included in Stats</option>
+        <option value="excluded">Excluded from Stats</option>
+      </select>
+    </div>
+  );
+}
+
+function StatsDataTable({ columns, rows, rowKey, onRowClick }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead className="text-left text-xs uppercase tracking-[0.18em] text-muted">
+          <tr>
+            {columns.map((column) => (
+              <th key={column.key} className={classNames("px-3 pb-3", column.align === "right" && "text-right")}>
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row[rowKey]}
+              className={classNames(
+                "border-t border-border",
+                onRowClick && "cursor-pointer transition-colors hover:bg-accent/10"
+              )}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+            >
+              {columns.map((column) => (
+                <td key={column.key} className={classNames("px-3 py-3 text-text", column.align === "right" && "text-right numbers", column.className)}>
+                  {column.render ? column.render(row) : row[column.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StatsView({ filters, onFiltersChange, options, overview, stats, mobile = false, onSelectPlayer }) {
+  const [tab, setTab] = useState("players");
+  const setFilter = (key, value) => onFiltersChange((current) => ({ ...current, [key]: value }));
+  const tabs = [
+    { id: "players", label: "Players" },
+    { id: "teams", label: "Teams" },
+    { id: "maps", label: "Maps" },
+    { id: "tournaments", label: "Tournaments" },
+  ];
+
+  const playersColumns = [
+    { key: "nickname", label: "Player" },
+    { key: "teamLabel", label: "Team" },
+    { key: "seriesPlayed", label: "Series", align: "right" },
+    { key: "roundsPlayed", label: "Rounds", align: "right" },
+    { key: "kda", label: "K / D / A", align: "right", render: (row) => row.kills + "/" + row.deaths + "/" + row.assists },
+    { key: "rating", label: "Rating", align: "right" },
+    { key: "adr", label: "ADR", align: "right" },
+    { key: "kastPercent", label: "KAST%", align: "right" },
+    { key: "hsPercent", label: "HS%", align: "right" },
+    { key: "clutches", label: "Clutches", align: "right", render: (row) => row.clutchesWon + "/" + row.clutchAttempts },
+  ];
+
+  const teamsColumns = [
+    { key: "name", label: "Team" },
+    { key: "seriesRecord", label: "Series", align: "right", render: (row) => row.seriesWins + "-" + row.seriesLosses },
+    { key: "mapsRecord", label: "Maps", align: "right", render: (row) => row.mapsWon + "-" + row.mapsLost },
+    { key: "seriesWinRate", label: "Series WR%", align: "right" },
+    { key: "mapWinRate", label: "Map WR%", align: "right" },
+    { key: "roundDiff", label: "Round Diff", align: "right" },
+    { key: "ctWinRate", label: "CT WR%", align: "right" },
+    { key: "tWinRate", label: "T WR%", align: "right" },
+  ];
+
+  const mapsColumns = [
+    { key: "mapName", label: "Map" },
+    { key: "played", label: "Played", align: "right" },
+    { key: "averageRounds", label: "Avg Rounds", align: "right" },
+    { key: "overtimeCount", label: "OT", align: "right" },
+    { key: "ctRoundWinRate", label: "CT WR%", align: "right" },
+    { key: "tRoundWinRate", label: "T WR%", align: "right" },
+    { key: "topTeam", label: "Best Team" },
+    { key: "topTeamWins", label: "Wins", align: "right" },
+  ];
+
+  const tournamentsColumns = [
+    { key: "name", label: "Tournament" },
+    { key: "matches", label: "Matches", align: "right" },
+    { key: "maps", label: "Maps", align: "right" },
+    { key: "participantsCount", label: "Teams", align: "right" },
+    { key: "lanMatches", label: "LAN", align: "right" },
+    { key: "onlineMatches", label: "Online", align: "right" },
+    { key: "stagesLabel", label: "Stages" },
+    { key: "topTeam", label: "Winner", render: (row) => row.hasFinal ? row.topTeam : "—" },
+    { key: "topMvp", label: "Final MVP", render: (row) => row.hasFinal && row.topMvp !== "-" ? `${row.topMvp}${row.topMvpRating != null ? ` (${row.topMvpRating})` : ""}` : "—" },
+  ];
+
+  const rowsByTab = {
+    players: stats.players,
+    teams: stats.teams,
+    maps: stats.maps,
+    tournaments: stats.tournaments,
+  };
+
+  const columnsByTab = {
+    players: playersColumns,
+    teams: teamsColumns,
+    maps: mapsColumns,
+    tournaments: tournamentsColumns,
+  };
+
+  return (
+    <div className="space-y-6">
+      <Panel title="Stats" subtitle="All tables recalculate from the saved archive and respect every filter below.">
+        <div className={classNames("grid gap-4", mobile ? "grid-cols-2" : "grid-cols-6")}>
+          <MetricCard icon={History} label="Matches" value={overview.includedMatches} tone="accent" />
+          <MetricCard icon={Trophy} label="Maps" value={overview.totalMaps} />
+          <MetricCard icon={BarChart3} label="Tournaments" value={overview.totalTournaments} />
+          <MetricCard icon={Users} label="Players" value={stats.players.length} />
+          <MetricCard icon={Shield} label="LAN" value={overview.lanMatches} />
+          <MetricCard icon={Clock3} label="Online" value={overview.onlineMatches} />
+        </div>
+        <div className="mt-4">
+          <ArchiveFilters filters={filters} onChange={setFilter} options={options} mobile={mobile} />
+        </div>
+      </Panel>
+      <Panel
+        title="Breakdowns"
+        subtitle="Players, teams, maps, and tournaments built from the filtered archive."
+        action={
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tabItem) => (
+              <button key={tabItem.id} type="button" onClick={() => setTab(tabItem.id)} className={classNames("rounded-xl border px-4 py-2 text-sm", tab === tabItem.id ? "border-accent bg-accent/10 text-accent" : "border-border text-muted")}>
+                {tabItem.label}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        <StatsDataTable
+          columns={columnsByTab[tab]}
+          rows={rowsByTab[tab]}
+          rowKey={tab === "players" ? "key" : tab === "maps" ? "mapName" : "name"}
+          onRowClick={tab === "players" && onSelectPlayer ? (row) => onSelectPlayer(row.key) : undefined}
+        />
+      </Panel>
+    </div>
+  );
+}
+
+function ResultsView({ results, mobile = false, onSelectPlayer }) {
+  const { t } = useI18n();
+  const [statsMode, setStatsMode] = useState("combined");
+  const [resultsMode, setResultsMode] = useState("overview");
+  const teamAPlayers = results.players.filter((player) => player.teamKey === "teamA");
+  const teamBPlayers = results.players.filter((player) => player.teamKey === "teamB");
+  const highlightCards = useMemo(() => buildHighlightCards(results), [results]);
+  return (
+    <div className="space-y-6">
+      <Panel title={t("series_results")} subtitle="Final scores, player leaders, map breakdowns, and highlight moments.">
+        <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1fr_320px]")}>
+          <div className="rounded-2xl border border-border bg-card/70 p-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-surface">{renderLogo(results.teamA.logo)}</div>
+                <div>
+                  <div className="font-display text-4xl text-text">{results.teamA.name}</div>
+                  <div className="text-sm text-muted">{results.teamA.tag}</div>
+                </div>
+              </div>
+              <div className="numbers text-5xl text-accent">
+                {results.seriesScore.teamA}-{results.seriesScore.teamB}
+              </div>
+              <div className="flex items-center gap-4">
+                <div>
+                  <div className="font-display text-right text-4xl text-text">{results.teamB.name}</div>
+                  <div className="text-right text-sm text-muted">{results.teamB.tag}</div>
+                </div>
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-surface">{renderLogo(results.teamB.logo)}</div>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-accent/30 bg-accent/10 p-5">
+            <div className="text-xs uppercase tracking-[0.2em] text-muted">Series MVP</div>
+            <div className="mt-2 font-display text-4xl text-text">{results.mvp?.nickname ?? "n/a"}</div>
+            <div className="mt-1 text-sm text-muted">
+              {results.mvp?.teamTag} · {results.mvp?.role}
+            </div>
+            <div className="mt-4 numbers text-3xl text-accent">{results.mvp?.rating ?? "0.00"}</div>
+          </div>
+        </div>
+      </Panel>
+      <div className="flex justify-end">
+        <ResultsModeSwitch mode={resultsMode} onChange={setResultsMode} />
+      </div>
+      {resultsMode === "overview" ? (
+        <>
+          <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[0.8fr_1.2fr]")}>
+            <Panel title={t("highlights")} subtitle="Auto-generated storylines, momentum swings, and star rounds.">
+              <div className="space-y-3">
+                {highlightCards.map((highlight) => (
+                  <div key={highlight.id} className="rounded-2xl border border-border bg-card/60 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-accent">{highlight.eyebrow}</div>
+                    <div className="mt-2 font-display text-2xl text-text">{highlight.title}</div>
+                    <div className="mt-2 text-sm text-muted">{highlight.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+            <Panel title={t("map_breakdown")} subtitle="Each map keeps half scores, economy spent, and round-type wins.">
+              <div className="space-y-4">
+                {results.maps.map((map) => (
+                  <div key={map.id} className="rounded-2xl border border-border bg-card/60 p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-display text-3xl text-text">{map.mapName}</div>
+                        <div className="text-sm text-muted">
+                          Winner: {map.winnerKey === "teamA" ? results.teamA.tag : results.teamB.tag}
+                        </div>
+                      </div>
+                      <div className="numbers text-3xl">
+                        {map.score.teamA}-{map.score.teamB}
+                      </div>
+                    </div>
+                    <div className={classNames("mt-4 grid gap-3 text-sm", mobile ? "grid-cols-1" : "grid-cols-3")}>
+                      <div className="rounded-xl border border-border bg-surface/80 p-3">
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted">Halves</div>
+                        <div className="mt-1">
+                          1H {map.halfBreakdown.firstHalf.teamA}-{map.halfBreakdown.firstHalf.teamB}
+                        </div>
+                        <div>
+                          2H {map.halfBreakdown.secondHalf.teamA}-{map.halfBreakdown.secondHalf.teamB}
+                        </div>
+                        {map.halfBreakdown.overtimes.map((ot) => (
+                          <div key={ot.label}>
+                            {ot.label} {ot.score.teamA}-{ot.score.teamB}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-xl border border-border bg-surface/80 p-3">
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted">Economy Spent</div>
+                        <div className="mt-1 numbers">{formatMoney(map.economySpent.teamA)}</div>
+                        <div className="numbers">{formatMoney(map.economySpent.teamB)}</div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-surface/80 p-3">
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted">Buy Wins</div>
+                        <div className="mt-1 text-muted">
+                          Eco {map.roundTypeWins.teamA.eco}/{map.roundTypeWins.teamB.eco}
+                        </div>
+                        <div className="text-muted">
+                          Force {map.roundTypeWins.teamA.force}/{map.roundTypeWins.teamB.force}
+                        </div>
+                        <div className="text-muted">
+                          Full {map.roundTypeWins.teamA.full}/{map.roundTypeWins.teamB.full}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+          <Panel
+            title={t("full_player_stats")}
+            subtitle="Series aggregate scoreboard with ratings, ADR, KAST, HS, clutches, and openings."
+            action={
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStatsMode("combined")}
+                  className={classNames(
+                    "rounded-xl border px-4 py-2 text-sm",
+                    statsMode === "combined" ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
+                  )}
+                >
+                  {t("combined")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatsMode("team")}
+                  className={classNames(
+                    "rounded-xl border px-4 py-2 text-sm",
+                    statsMode === "team" ? "border-accent bg-accent/10 text-accent" : "border-border text-muted"
+                  )}
+                >
+                  {t("by_team")}
+                </button>
+              </div>
+            }
+          >
+            {statsMode === "combined" ? (
+              <StatsTable players={results.players} showTeam onSelectPlayer={onSelectPlayer} />
+            ) : (
+              <div className={classNames("grid gap-8", mobile ? "grid-cols-1" : "grid-cols-2")}>
+                <div className="min-w-0">
+                  <div className="mb-3 font-display text-2xl text-text">{results.teamA.name}</div>
+                  <StatsTable players={teamAPlayers} onSelectPlayer={onSelectPlayer} />
+                </div>
+                <div className="min-w-0">
+                  <div className="mb-3 font-display text-2xl text-text">{results.teamB.name}</div>
+                  <StatsTable players={teamBPlayers} onSelectPlayer={onSelectPlayer} />
+                </div>
+              </div>
+            )}
+          </Panel>
+        </>
+      ) : resultsMode === "analyst" ? (
+        <AnalystDeskView results={results} mobile={mobile} />
+      ) : (
+        <MapHeatmapsView results={results} mobile={mobile} />
+      )}
+    </div>
+  );
+}
+
+function StatsTable({ players, showTeam = false, onSelectPlayer }) {
+  const { t } = useI18n();
+  const columns = showTeam
+    ? ["22%", "8%", "13%", "9%", "9%", "10%", "7%", "10%", "6%", "6%"]
+    : ["27%", "15%", "10%", "10%", "11%", "8%", "10%", "5%", "4%"];
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full table-fixed text-[13px]">
+        <colgroup>
+          {columns.map((width, index) => (
+            <col key={index} style={{ width }} />
+          ))}
+        </colgroup>
+        <thead className="text-left text-xs uppercase tracking-[0.2em] text-muted">
+          <tr>
+            <th className="px-3 pb-3">{t("player")}</th>
+            {showTeam && <th className="px-3 pb-3">{t("team")}</th>}
+            <th className="px-3 pb-3 text-right">K / D / A</th>
+            <th className="px-3 pb-3 text-right">{t("rating")}</th>
+            <th className="px-3 pb-3 text-right">ADR</th>
+            <th className="px-3 pb-3 text-right">KAST%</th>
+            <th className="px-3 pb-3 text-right">HS%</th>
+            <th className="px-3 pb-3 text-right">Clutches</th>
+            <th className="px-3 pb-3 text-right">Openings</th>
+            <th className="px-3 pb-3 text-right">Best Round</th>
+          </tr>
+        </thead>
+        <tbody>
+          {players.map((player) => (
+            <tr
+              key={`${player.teamKey}_${player.id}`}
+              className={classNames(
+                "border-t border-border",
+                onSelectPlayer && "cursor-pointer transition-colors hover:bg-accent/10"
+              )}
+              onClick={onSelectPlayer ? () => onSelectPlayer(`${player.id}::${player.nickname}`) : undefined}
+            >
+              <td className="truncate px-3 py-3 font-display text-xl text-text">
+                <span className="inline-flex items-center gap-2">
+                  {onSelectPlayer && <span className="text-[10px] uppercase tracking-wider text-muted hover:text-accent">▾</span>}
+                  {player.nickname}
+                </span>
+              </td>
+              {showTeam && <td className="px-3 py-3 text-muted">{player.teamTag}</td>}
+              <td className="px-3 py-3 text-right numbers">
+                {player.kills}/{player.deaths}/{player.assists}
+              </td>
+              <td className="px-3 py-3 text-right numbers" style={{ color: getRatingColor(player.rating) }}>
+                {player.rating}
+              </td>
+              <td className="px-3 py-3 text-right numbers">{player.adr}</td>
+              <td className="px-3 py-3 text-right numbers">{player.kastPercent}%</td>
+              <td className="px-3 py-3 text-right numbers">{player.hsPercent}%</td>
+              <td className="px-3 py-3 text-right numbers">
+                {player.clutchesWon}/{player.clutchAttempts}
+              </td>
+              <td className="px-3 py-3 text-right numbers">{player.openingKills}</td>
+              <td className="px-3 py-3 text-right numbers">{player.bestRoundKills}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function HistoryView({ filters, onFiltersChange, options, overview, entries, onOpen, onToggleStats, onDeleteMatch, onClear, mobile = false }) {
+  const { t } = useI18n();
+  const setFilter = (key, value) => onFiltersChange((current) => ({ ...current, [key]: value }));
+  return (
+    <div className="space-y-6">
+      <Panel
+        title={t("history")}
+        subtitle="Full local match archive with tournament metadata, period filters, and stat inclusion control."
+        action={
+          <button type="button" onClick={onClear} className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+            <Trash2 size={16} />
+            {t("clear_history")}
+          </button>
+        }
+      >
+        <div className={classNames("mb-4 grid gap-4", mobile ? "grid-cols-1" : "grid-cols-4")}>
+          <MetricCard icon={History} label="Archive Matches" value={overview.totalMatches} tone="accent" />
+          <MetricCard icon={Check} label="In Stats" value={overview.includedMatches} />
+          <MetricCard icon={Filter} label="Excluded" value={overview.excludedMatches} />
+          <MetricCard icon={Trophy} label="Tournaments" value={overview.totalTournaments} />
+        </div>
+        <ArchiveFilters filters={filters} onChange={setFilter} options={options} mobile={mobile} />
+        <div className="space-y-3">
+          {entries.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted">
+              No history entries match the current filter.
+            </div>
+          )}
+          {entries.map((entry) => (
+            <div key={entry.id} className="rounded-2xl border border-border bg-card/60 p-4">
+              <div className={classNames("gap-4", mobile ? "space-y-3" : "flex items-center justify-between")}>
+                <button type="button" onClick={() => onOpen(entry)} className="min-w-0 flex-1 text-left">
+                  <div className="font-display text-2xl text-text">{entry.teams}</div>
+                  <div className="mt-1 text-sm text-muted">
+                    {entry.matchDate} ? {entry.tournamentName} ? {entry.stage} ? {entry.eventType} ? MVP {entry.mvp}
+                  </div>
+                  <div className="mt-2 text-xs uppercase tracking-[0.18em] text-muted">{entry.mapsPlayed}</div>
+                </button>
+                <div className={classNames("flex items-center gap-2", mobile && "justify-between")}>
+                  <div className={classNames("numbers text-3xl text-accent", mobile && "text-left")}>{entry.score}</div>
+                  <button type="button" onClick={() => onToggleStats(entry.id)} className="rounded-xl border border-border px-3 py-2 text-xs text-text">
+                    {entry.includedInStats === false ? "Include" : "Exclude"}
+                  </button>
+                  <button type="button" onClick={() => onDeleteMatch(entry.id)} className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PlayerDetailModal — click any player (in Stats or Results) to open a full
+// breakdown: aggregated career stats + per-match log. Reads matchHistory from
+// the DB-backed state, so it respects include/exclude toggles.
+// ---------------------------------------------------------------------------
+function PlayerDetailModal({ playerKey, matchHistory, onClose }) {
+  const [tab, setTab] = useState("overview");
+
+  // playerKey is `${id}::${nickname}` (matches aggregatePlayerStats key)
+  const [playerId, playerNickname] = useMemo(() => {
+    const sep = playerKey.indexOf("::");
+    if (sep === -1) return [playerKey, ""];
+    return [playerKey.slice(0, sep), playerKey.slice(sep + 2)];
+  }, [playerKey]);
+
+  // Collect every match where this player appeared (only stats-included matches)
+  const matches = useMemo(() => {
+    return (matchHistory ?? [])
+      .filter((entry) => entry.includedInStats !== false && entry.data)
+      .map((entry) => {
+        const player = (entry.data.players ?? []).find(
+          (p) => p.id === playerId && p.nickname === playerNickname
+        );
+        if (!player) return null;
+        return {
+          entry,
+          player,
+          teamA: entry.data.teamA,
+          teamB: entry.data.teamB,
+          winnerKey: entry.data.winnerKey,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.entry.date) - new Date(a.entry.date));
+  }, [matchHistory, playerId, playerNickname]);
+
+  // Aggregate career totals
+  const career = useMemo(() => {
+    const agg = {
+      nickname: playerNickname,
+      role: matches[0]?.player.role ?? "-",
+      teams: new Set(),
+      seriesPlayed: matches.length,
+      kills: 0, deaths: 0, assists: 0, damage: 0, headshots: 0,
+      openingKills: 0, entriesWon: 0, clutchesWon: 0, clutchAttempts: 0,
+      flashAssists: 0, roundsPlayed: 0, kastRounds: 0, survivedRounds: 0,
+      bestRoundKills: 0, wins: 0, losses: 0, mvpCount: 0,
+    };
+    for (const m of matches) {
+      const p = m.player;
+      agg.teams.add(p.teamTag ?? p.teamName ?? "");
+      agg.kills += p.kills ?? 0;
+      agg.deaths += p.deaths ?? 0;
+      agg.assists += p.assists ?? 0;
+      agg.damage += p.damage ?? 0;
+      agg.headshots += p.headshots ?? 0;
+      agg.openingKills += p.openingKills ?? 0;
+      agg.entriesWon += p.entriesWon ?? 0;
+      agg.clutchesWon += p.clutchesWon ?? 0;
+      agg.clutchAttempts += p.clutchAttempts ?? 0;
+      agg.flashAssists += p.flashAssists ?? 0;
+      agg.roundsPlayed += p.roundsPlayed ?? 0;
+      agg.kastRounds += p.kastRounds ?? 0;
+      agg.survivedRounds += p.survivedRounds ?? 0;
+      agg.bestRoundKills = Math.max(agg.bestRoundKills, p.bestRoundKills ?? 0);
+      if (p.teamKey === m.winnerKey) agg.wins += 1;
+      else agg.losses += 1;
+      const mvp = m.entry?.data?.mvp;
+      if (mvp && (mvp.id === playerId || mvp.nickname === playerNickname)) agg.mvpCount += 1;
+    }
+    const rp = Math.max(1, agg.roundsPlayed);
+    const kpr = agg.kills / rp;
+    const dpr = agg.deaths / rp;
+    const adr = agg.damage / rp;
+    const kast = agg.kastRounds / rp;
+    const impact = (2 * kpr + 2.5 * (agg.entriesWon / rp) + agg.openingKills / rp) / 3;
+    const rawRating =
+      (kpr * 0.73 + (0.44 - dpr) * 0.54 + (adr / 100) * 0.38 + kast * 0.16 + impact * 0.1) * 1.08;
+    const sampleWeight = Math.min(1, Math.max(0.14, (rp - 1) / 8));
+    agg.rating = Math.round((1 + (rawRating - 1) * sampleWeight) * 100) / 100;
+    agg.kd = Math.round((agg.kills / Math.max(1, agg.deaths)) * 100) / 100;
+    agg.adr = Math.round(adr * 10) / 10;
+    agg.kastPercent = Math.round(kast * 100);
+    agg.hsPercent = Math.round((agg.headshots / Math.max(1, agg.kills)) * 100);
+    agg.impact = Math.round(impact * 100) / 100;
+    agg.teamLabel = agg.teams.size === 1 ? [...agg.teams][0] : ([...agg.teams].filter(Boolean).join(", ") || "Multi");
+    return agg;
+  }, [matches, playerId, playerNickname]);
+
+  // Close on Escape + lock scroll
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  if (matches.length === 0) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+        <div className="panel max-w-md rounded-2xl p-6 text-center" onClick={(e) => e.stopPropagation()}>
+          <div className="font-display text-2xl text-text">{playerNickname || "Player"}</div>
+          <div className="mt-2 text-sm text-muted">No matches found for this player in the archive.</div>
+          <button type="button" onClick={onClose} className="mt-4 rounded-xl border border-border bg-card/70 px-4 py-2 text-sm text-text hover:bg-accent/10">Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    { id: "matches", label: `Matches (${matches.length})` },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="panel max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border bg-gradient-to-r from-accent/10 to-transparent px-6 py-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-accent/40 bg-accent/10 font-display text-2xl text-accent">
+              {playerNickname.slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <div className="font-display text-3xl text-text">{playerNickname}</div>
+              <div className="text-sm text-muted">
+                {career.role} · {career.teamLabel} · {career.seriesPlayed} series · {career.wins}W {career.losses}L
+              </div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs uppercase tracking-[0.2em] text-muted">Career Rating</div>
+            <div className="numbers text-4xl font-bold" style={{ color: getRatingColor(career.rating) }}>
+              {career.rating.toFixed(2)}
+            </div>
+            {career.mvpCount > 0 && (
+              <div className="mt-1 text-xs text-accent">{career.mvpCount}× Match MVP</div>
+            )}
+          </div>
+          <button type="button" onClick={onClose} className="ml-4 rounded-xl border border-border bg-card/70 px-3 py-2 text-sm text-text hover:bg-accent/10">
+            ✕
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 border-b border-border px-6 py-3">
+          {tabs.map((tabItem) => (
+            <button
+              key={tabItem.id}
+              type="button"
+              onClick={() => setTab(tabItem.id)}
+              className={classNames(
+                "rounded-xl border px-4 py-2 text-sm",
+                tab === tabItem.id ? "border-accent bg-accent/10 text-accent" : "border-border text-muted hover:text-text"
+              )}
+            >
+              {tabItem.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="max-h-[calc(90vh-180px)] overflow-y-auto scrollbar-thin p-6">
+          {tab === "overview" ? (
+            <div className="space-y-6">
+              {/* Core stats grid */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                <PlayerStatTile label="Kills" value={career.kills} tone="emerald" />
+                <PlayerStatTile label="Deaths" value={career.deaths} tone="red" />
+                <PlayerStatTile label="Assists" value={career.assists} tone="muted" />
+                <PlayerStatTile label="K/D" value={career.kd.toFixed(2)} tone="accent" />
+                <PlayerStatTile label="ADR" value={career.adr} tone="accent" />
+                <PlayerStatTile label="Rounds" value={career.roundsPlayed} tone="muted" />
+                <PlayerStatTile label="KAST%" value={`${career.kastPercent}%`} tone="emerald" />
+                <PlayerStatTile label="HS%" value={`${career.hsPercent}%`} tone="muted" />
+                <PlayerStatTile label="Impact" value={career.impact.toFixed(2)} tone="accent" />
+                <PlayerStatTile label="Openings" value={career.openingKills} tone="amber" />
+                <PlayerStatTile label="Clutches" value={`${career.clutchesWon}/${career.clutchAttempts}`} tone="amber" />
+                <PlayerStatTile label="Best Round" value={`${career.bestRoundKills}K`} tone="amber" />
+              </div>
+
+              {/* Win rate bar */}
+              <div className="rounded-2xl border border-border bg-card/60 p-4">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="text-muted">Series win rate</span>
+                  <span className="numbers text-accent">
+                    {career.seriesPlayed > 0 ? Math.round((career.wins / career.seriesPlayed) * 100) : 0}%
+                    <span className="ml-2 text-muted">{career.wins}W / {career.losses}L</span>
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-surface">
+                  <div
+                    className="h-full bg-gradient-to-r from-accent to-amber-300"
+                    style={{ width: `${career.seriesPlayed > 0 ? (career.wins / career.seriesPlayed) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Teams played for */}
+              <div className="rounded-2xl border border-border bg-card/60 p-4">
+                <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted">Teams represented</div>
+                <div className="flex flex-wrap gap-2">
+                  {[...career.teams].filter(Boolean).map((t) => (
+                    <span key={t} className="rounded-lg border border-border bg-surface px-3 py-1 text-sm text-text">{t}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {matches.map(({ entry, player, teamA, teamB, winnerKey }) => {
+                const playerWon = player.teamKey === winnerKey;
+                const date = entry.matchDate || (entry.date ? entry.date.slice(0, 10) : "");
+                return (
+                  <div key={entry.id} className="rounded-2xl border border-border bg-card/60 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={classNames("rounded-md px-2 py-0.5 text-xs font-bold uppercase", playerWon ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300")}>
+                            {playerWon ? "WIN" : "LOSS"}
+                          </span>
+                          <span className="font-display text-xl text-text">{teamA.name} vs {teamB.name}</span>
+                        </div>
+                        <div className="mt-1 text-sm text-muted">
+                          {date} · {entry.tournamentName} · {entry.stage} · {entry.eventType}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="numbers text-2xl" style={{ color: getRatingColor(player.rating) }}>
+                          {player.rating.toFixed(2)}
+                        </div>
+                        <div className="text-xs text-muted">rating</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-4 gap-2 text-center sm:grid-cols-6 lg:grid-cols-8">
+                      <PlayerMiniStat label="K" value={player.kills} tone="emerald" />
+                      <PlayerMiniStat label="D" value={player.deaths} tone="red" />
+                      <PlayerMiniStat label="A" value={player.assists} />
+                      <PlayerMiniStat label="ADR" value={player.adr} />
+                      <PlayerMiniStat label="KAST" value={`${player.kastPercent}%`} />
+                      <PlayerMiniStat label="HS" value={`${player.hsPercent}%`} />
+                      <PlayerMiniStat label="OpK" value={player.openingKills} />
+                      <PlayerMiniStat label="Clutch" value={`${player.clutchesWon}/${player.clutchAttempts}`} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlayerStatTile({ label, value, tone = "muted" }) {
+  const toneClass = {
+    emerald: "text-emerald-300",
+    red: "text-red-300",
+    accent: "text-accent",
+    amber: "text-amber-300",
+    muted: "text-text",
+  }[tone] || "text-text";
+  return (
+    <div className="rounded-2xl border border-border bg-card/60 p-3 text-center">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted">{label}</div>
+      <div className={classNames("numbers mt-1 text-2xl font-bold", toneClass)}>{value}</div>
+    </div>
+  );
+}
+
+function PlayerMiniStat({ label, value, tone }) {
+  const toneClass = tone === "emerald" ? "text-emerald-300" : tone === "red" ? "text-red-300" : "text-text";
+  return (
+    <div className="rounded-lg border border-border bg-surface/60 px-2 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-muted">{label}</div>
+      <div className={classNames("numbers text-sm font-semibold", toneClass)}>{value}</div>
+    </div>
+  );
+}
+

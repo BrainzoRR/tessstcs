@@ -1,0 +1,213 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---- CS2 Pro Match Simulator — original user theme (contrast-fixed) ---- */
+:root {
+  --bg: #0a0b0d;
+  --surface: #111318;
+  --card: #1a1d24;
+  --border: #2a2d36;
+  --accent: #f5a623;
+  --danger: #e63950;
+  --ct: #5b8dd9;
+  --text-primary: #e8eaf0;
+  /* lightened for WCAG AA contrast on dark panels (was #6b7280 → ~2.5:1) */
+  --text-muted: #a8b0c0;
+  --text-numbers: #f5f5f5;
+  --radius: 8px;
+
+  /* shadcn-compatible aliases (accent stays amber, matching the original) */
+  --background: #0a0b0d;
+  --foreground: #e8eaf0;
+  --card-foreground: #e8eaf0;
+  --popover: #111318;
+  --popover-foreground: #e8eaf0;
+  --primary: #f5a623;
+  --primary-foreground: #0a0b0d;
+  --secondary: #1a1d24;
+  --secondary-foreground: #e8eaf0;
+  --muted: #111318;
+  --muted-foreground: #a8b0c0;
+  --accent-foreground: #0a0b0d;
+  --destructive: #e63950;
+  --destructive-foreground: #ffffff;
+  --input: #2a2d36;
+  --ring: #f5a623;
+}
+
+@theme inline {
+  --font-sans: var(--font-rajdhani);
+  --font-mono: var(--font-jetbrains-mono);
+
+  /* Original app theme colors — these power text-text, text-muted, bg-surface,
+     bg-card, text-accent, border-border, bg-bg, text-numbers, text-danger, text-ct
+     utility classes used throughout the original App.jsx. */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --color-ct: var(--ct);
+  --color-text: var(--text-primary);
+  --color-muted: var(--text-muted);
+  --color-numbers: var(--text-numbers);
+
+  /* shadcn-compatible aliases (used only by the Toaster / ui components) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-width: 1280px;
+  background:
+    radial-gradient(circle at top left, rgba(245, 166, 35, 0.14), transparent 22%),
+    radial-gradient(circle at top right, rgba(91, 141, 217, 0.12), transparent 20%),
+    linear-gradient(180deg, #0a0b0d 0%, #0d1015 48%, #08090b 100%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  font-family: var(--font-rajdhani), "Rajdhani", sans-serif;
+  overflow-x: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+@media (max-width: 1279px) {
+  body {
+    min-width: 0;
+  }
+}
+
+html.phone-live,
+body.phone-live {
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(26, 29, 36, 0.98), rgba(18, 20, 24, 0.98));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+.numbers {
+  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  color: var(--text-numbers);
+}
+
+.stat-track {
+  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+}
+
+.stat-fill {
+  background: linear-gradient(90deg, rgba(245, 166, 35, 0.9), rgba(245, 206, 73, 0.9));
+}
+
+.page-enter {
+  animation: pageEnter 260ms ease-out;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(107, 114, 128, 0.5);
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: rgba(17, 19, 24, 0.55);
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(17,19,24,0.85), rgba(12,13,16,0.9));
+  backdrop-filter: blur(14px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+}
+
+/* ---- Explicit color utilities for the original App.jsx ----
+   Tailwind v4 @theme did not reliably emit text-muted / bg-surface / text-text,
+   so we define them here as plain utilities tied to the original CSS variables.
+   These override any partial generation and guarantee correct contrast. */
+@layer utilities {
+  .text-text { color: var(--text-primary); }
+  .text-muted { color: var(--text-muted); }
+  .text-numbers { color: var(--text-numbers); }
+  .text-accent { color: var(--accent); }
+  .text-danger { color: var(--danger); }
+  .text-ct { color: var(--ct); }
+  .bg-bg { background-color: var(--bg); }
+  .bg-surface { background-color: var(--surface); }
+  .bg-card { background-color: var(--card); }
+  .bg-accent { background-color: var(--accent); }
+  .border-accent { border-color: var(--accent); }
+  /* opacity variants used across the app: bg-accent/10, border-accent/40, etc. */
+  .bg-accent\/10 { background-color: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .bg-accent\/20 { background-color: color-mix(in srgb, var(--accent) 20%, transparent); }
+  .bg-accent\/30 { background-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .border-accent\/30 { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .border-accent\/40 { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .border-accent\/50 { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+  .text-accent\/10 { color: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .from-accent\/10 { --tw-gradient-from: color-mix(in srgb, var(--accent) 10%, transparent); }
+}
