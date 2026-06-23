@@ -971,6 +971,17 @@ function appReducer(state, action) {
       const finishedMatch = action.payload;
       const results = normalizeResultsDataShape(finishedMatch.results ?? buildResultsData(finishedMatch));
       const historyEntry = normalizeHistoryEntry(buildHistoryEntry(results));
+      // Override the match id with a globally-unique value. The original
+      // simulation.js `uid()` uses a simple in-memory counter that resets to 0
+      // on every page load, so match #1 always becomes `match_1`. That makes
+      // the next simulated match overwrite the previous one in the DB (upsert
+      // by id). Generating a fresh unique id here keeps every saved match as
+      // its own row forever.
+      const uniqueId = `match_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      historyEntry.id = uniqueId;
+      if (historyEntry.data) {
+        historyEntry.data.id = uniqueId;
+      }
       return {
         ...state,
         currentMatch: null,
@@ -1041,6 +1052,20 @@ function appReducer(state, action) {
         ...state,
         matchHistory: sanitizeMatchHistory(action.payload ?? []),
       };
+    case "MERGE_HISTORY": {
+      // Merge DB-loaded entries with the current local matchHistory without
+      // losing anything: DB entries take precedence (they are authoritative),
+      // but local-only entries (e.g. just-simulated, not yet synced) are kept.
+      const incoming = Array.isArray(action.payload) ? action.payload : [];
+      const incomingIds = new Set(incoming.map((e) => e?.id).filter(Boolean));
+      const localOnly = state.matchHistory.filter(
+        (entry) => !incomingIds.has(entry.id)
+      );
+      return {
+        ...state,
+        matchHistory: sanitizeMatchHistory([...incoming, ...localOnly]),
+      };
+    }
     case "CLEAR_ACTIVE_MATCH":
       return {
         ...state,
@@ -1311,15 +1336,29 @@ function App() {
     });
     // Persist to localStorage defensively — when the DB holds many matches the
     // full snapshot can exceed the ~5MB localStorage quota. The DB is the
-    // authoritative store, so it is safe to skip/best-effort the local cache.
+    // authoritative store, so on quota error we persist a prefs-only snapshot
+    // WITHOUT touching the existing matchHistory (we must never overwrite the
+    // user's saved matches with an empty list). If even the prefs snapshot
+    // doesn't fit, we leave the previous localStorage value untouched.
     try {
       window.localStorage.setItem(STORAGE_KEY, serialized);
     } catch (quotaErr) {
-      // Try a trimmed snapshot (no matchHistory data) so UI prefs still persist.
       try {
-        const trimmed = JSON.stringify({
+        const prefsOnly = JSON.stringify({
           snapshotVersion: SNAPSHOT_VERSION,
-          state: { ...state, matchHistory: [] },
+          // Keep the previously-persisted matchHistory if present so a reload
+          // never loses saved matches before the DB hydration runs.
+          state: {
+            ...state,
+            matchHistory: (() => {
+              try {
+                const prev = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
+                return prev?.state?.matchHistory ?? prev?.matchHistory ?? state.matchHistory ?? [];
+              } catch {
+                return state.matchHistory ?? [];
+              }
+            })(),
+          },
           matchSetup,
           language,
           siteMode,
@@ -1329,7 +1368,7 @@ function App() {
           soundDesignEnabled,
           lastSavedAt: new Date().toISOString(),
         });
-        window.localStorage.setItem(STORAGE_KEY, trimmed);
+        window.localStorage.setItem(STORAGE_KEY, prefsOnly);
       } catch {
         // give up silently — DB sync still works
       }
@@ -1338,19 +1377,25 @@ function App() {
   }, [state, matchSetup, language, siteMode, liveLayoutMode, livePresentationMode, livePlaybackRate, soundDesignEnabled]);
 
   // ---- Database hydration: load persisted matchHistory from the server ----
+  // Runs ONCE. Uses MERGE_HISTORY (not SET_HISTORY) so any matches the user
+  // already simulated locally this session are preserved — the DB is
+  // authoritative for what it knows about, but local-only entries are kept
+  // and will be synced back to the DB by the sync effect below.
   useEffect(() => {
+    if (dbHydratedRef.current) return;
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/matches", { cache: "no-store" });
-        if (!res.ok) return;
+        if (!res.ok) {
+          dbHydratedRef.current = true;
+          return;
+        }
         const data = await res.json();
         const dbEntries = Array.isArray(data?.entries) ? data.entries : [];
         if (cancelled) return;
-        if (dbEntries.length > 0) {
-          // Server is the source of truth — replace local history.
-          dispatch({ type: "SET_HISTORY", payload: dbEntries });
-        }
+        // Merge DB entries with whatever is already in local state.
+        dispatch({ type: "MERGE_HISTORY", payload: dbEntries });
         dbHydratedRef.current = true;
       } catch (err) {
         console.error("DB hydration failed", err);
@@ -1363,6 +1408,11 @@ function App() {
   }, []);
 
   // ---- Database sync: debounce-push matchHistory changes to the server ----
+  // IMPORTANT: we only ever UPSERT matches here (add/update). We must never
+  // let an empty local matchHistory wipe the DB — localStorage quota issues
+  // can temporarily make state.matchHistory empty right after load, and the
+  // reconcile endpoint would otherwise delete every saved match. So we pass
+  // a special "merge-only" flag that tells the server to skip deletion.
   useEffect(() => {
     if (!dbHydratedRef.current) return;
     window.clearTimeout(dbSyncTimerRef.current);
@@ -1371,7 +1421,7 @@ function App() {
         await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entries: state.matchHistory }),
+          body: JSON.stringify({ entries: state.matchHistory, mergeOnly: true }),
         });
       } catch (err) {
         console.error("DB sync failed", err);
