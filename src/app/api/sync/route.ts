@@ -33,18 +33,28 @@ export async function POST(req: NextRequest) {
     const mergeOnly = body?.mergeOnly !== false; // default true (safe)
     const incomingIds = new Set(incoming.map((e) => e?.id).filter(Boolean));
 
+    console.log(`[api/sync] received ${incoming.length} entries (mergeOnly=${mergeOnly})`);
+
     // Upsert all incoming entries
     let upserted = 0;
     for (const entry of incoming) {
-      if (!entry?.id) continue;
-      const row = entryToRow(entry);
-      await db.matchRecord.upsert({
-        where: { id: row.id },
-        create: row,
-        update: row,
-      });
-      upserted += 1;
+      if (!entry?.id) {
+        console.log("[api/sync] skipping entry without id");
+        continue;
+      }
+      try {
+        const row = entryToRow(entry);
+        await db.matchRecord.upsert({
+          where: { id: row.id },
+          create: row,
+          update: row,
+        });
+        upserted += 1;
+      } catch (upsertErr) {
+        console.error(`[api/sync] upsert failed for id=${entry.id}:`, upsertErr);
+      }
     }
+    console.log(`[api/sync] upserted ${upserted}/${incoming.length}`);
 
     let deleted = 0;
     if (!mergeOnly) {

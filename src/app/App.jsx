@@ -1394,9 +1394,38 @@ function App() {
         const data = await res.json();
         const dbEntries = Array.isArray(data?.entries) ? data.entries : [];
         if (cancelled) return;
+        // Compute local-only matches (in localStorage but not in DB) so we
+        // can push them to the server immediately after merge. Without this,
+        // matches that exist only locally (e.g. after the DB was wiped) would
+        // never reach the server because the debounce sync only fires on
+        // state.matchHistory changes, and MERGE with the same local entries
+        // may not produce a reference change React detects.
+        const dbIds = new Set(dbEntries.map((e) => e?.id).filter(Boolean));
+        const localOnly = (state.matchHistory ?? []).filter(
+          (entry) => !dbIds.has(entry.id)
+        );
         // Merge DB entries with whatever is already in local state.
         dispatch({ type: "MERGE_HISTORY", payload: dbEntries });
         dbHydratedRef.current = true;
+        // Force-push any local-only matches to the server right now.
+        if (localOnly.length > 0) {
+          console.log(`[db] force-syncing ${localOnly.length} local-only match(es) to DB`);
+          try {
+            const syncRes = await fetch("/api/sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ entries: localOnly, mergeOnly: true }),
+            });
+            if (!syncRes.ok) {
+              console.error("[db] force-sync failed", await syncRes.text());
+            } else {
+              const syncData = await syncRes.json();
+              console.log("[db] force-sync ok, upserted:", syncData.synced);
+            }
+          } catch (e) {
+            console.error("[db] force-sync error", e);
+          }
+        }
       } catch (err) {
         console.error("DB hydration failed", err);
         dbHydratedRef.current = true;
@@ -1405,6 +1434,7 @@ function App() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- Database sync: debounce-push matchHistory changes to the server ----
@@ -1417,14 +1447,22 @@ function App() {
     if (!dbHydratedRef.current) return;
     window.clearTimeout(dbSyncTimerRef.current);
     dbSyncTimerRef.current = window.setTimeout(async () => {
+      const entries = state.matchHistory ?? [];
+      console.log(`[db] sync: sending ${entries.length} match(es) to DB (mergeOnly)`);
       try {
-        await fetch("/api/sync", {
+        const syncRes = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entries: state.matchHistory, mergeOnly: true }),
+          body: JSON.stringify({ entries, mergeOnly: true }),
         });
+        if (!syncRes.ok) {
+          console.error("[db] sync HTTP error", syncRes.status, await syncRes.text());
+        } else {
+          const syncData = await syncRes.json();
+          console.log(`[db] sync ok — upserted ${syncData.synced}, DB total now ${(syncData.entries ?? []).length}`);
+        }
       } catch (err) {
-        console.error("DB sync failed", err);
+        console.error("[db] sync failed", err);
       }
     }, 900);
     return () => window.clearTimeout(dbSyncTimerRef.current);

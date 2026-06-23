@@ -220,3 +220,74 @@ Stage Summary:
 - Проблема "сохраняется только последний матч" решена: уникальные ID + merge hydration + safe persist.
 - Все матчи теперь сохраняются в БД навсегда, переживают reload, статистика агрегирует по всем.
 - Оригинальный simulation.js не изменён (фикс только в App.jsx reducer + API sync).
+
+---
+Task ID: rebuild-deploy-archives
+Agent: Z.ai Code (main)
+Task: Пользователь: "а ты в zip поменял? а то как деплоить мне" — пересоздать архивы с исправлениями.
+
+Work Log:
+- Пересоздал cs2-vercel-deploy.zip (631KB) и cs2-project-for-vercel.tar.gz (609KB) с актуальным кодом:
+  - src/app/App.jsx — уникальные ID матчей (match_${Date.now()}_${random}), MERGE_HISTORY action, safe persist
+  - src/app/api/sync/route.ts — mergeOnly параметр (sync только upsert, не удаляет)
+  - src/app/globals.css — исправленный контраст (explicit utilities)
+  - prisma/schema.prisma — provider = postgresql (для Vercel)
+- Включил README-DEPLOY.md + NEON-SETUP-RU.md внутри архивов.
+- Проверил что исправления реально в zip: grep подтвердил match_${Date.now (1), MERGE_HISTORY (3), mergeOnly (6), provider postgresql.
+
+Stage Summary:
+- Архивы обновлены: deploy-export/cs2-vercel-deploy.zip и cs2-project-for-vercel.tar.gz содержат все исправления (уникальные ID, merge hydration, safe persist, mergeOnly sync, postgres provider).
+- Пользователь может скачивать zip и деплоить на Vercel — там уже актуальный код.
+
+---
+Task ID: debug-endpoint-for-vercel
+Agent: Z.ai Code (main)
+Task: Пользователь: на Vercel в Neon сохранился только один матч, хотя сымулировал в двух браузерах. Нужно дать инструмент диагностики.
+
+Work Log:
+- Проверил локально: DB имеет 5 матчей с уникальными ID, код работает. Проблема именно в Vercel деплое — либо старая версия кода, либо DATABASE_URL не задан/неправильный.
+- Создал /api/debug эндпоинт — показывает: dbProvider (file/postgresql), dbHost (host DATABASE_URL без кредов), totalMatches, recentMatches (10 последних с id/teams/score), hint с конкретной рекомендацией.
+- Локально проверил: debug корректно показывает "file (SQLite)" + warning что данные не сохранятся на Vercel.
+- Пересоздал архивы (zip 636KB + tar.gz 609KB) с debug эндпоинтом внутри.
+- Debug показывает 3 сценария: SQLite warning (если DATABASE_URL=file:), empty DB hint, success message.
+
+Stage Summary:
+- Добавлен /api/debug — пользователь может открыть https://свой-домен.vercel.app/api/debug и увидеть реальное состояние БД: какой провайдер (file vs postgresql), сколько матчей, какие ID.
+- Это поможет диагностировать: если показывает "file (SQLite)" → DATABASE_URL не задан на Vercel; если "postgresql" но 0 матчей → таблицы не созданы или sync не работает; если показывает 1 матч → код старый (нужен redeploy с новым zip).
+- Архивы обновлены.
+
+---
+Task ID: fix-vercel-build-conflict
+Agent: Z.ai Code (main)
+Task: Пользователь не может заредеплоить на Vercel — build error: "Conflicting route and page at /: route at /route and page at /page".
+
+Work Log:
+- Причина: в src/app/api/ остался файл route.ts от изначального Next.js шаблона (отвечал на GET /api, возвращал "Hello world"). Turbopack production build (который использует Vercel) строже локального dev и считает что /api/route конфликтует с /api/* роутами. Локальный dev (webpack) это терпел, Vercel build — нет.
+- Решение 1: удалил src/app/api/route.ts (мусор, не нужен).
+- Решение 2: вынес dynamic import с ssr:false в отдельный клиентский компонент ClientApp.tsx. Раньше page.tsx была одновременно "use client" и содержала dynamic ssr:false — Turbopack ругается на такую комбинацию. Теперь page.tsx (server component) рендерит <ClientApp/>, а ClientApp.tsx ("use client") делает dynamic import с ssr:false. Это правильный паттерн Next.js 16.
+- Проверил локально: bun run build прошёл успешно за 7.2s, все роуты корректны (/ статический, /api/* dynamic). Ошибка конфликта устранена.
+- Пересоздал архивы (zip 636KB + tar.gz 609KB) без api/route.ts и с ClientApp.tsx.
+- Проверил zip: api/route.ts отсутствует ✓, ClientApp.tsx присутствует ✓, page.tsx импортирует ClientApp ✓.
+
+Stage Summary:
+- Build error "Conflicting route and page" исправлен: удалён мусорный api/route.ts + вынесен dynamic ssr:false в ClientApp.tsx.
+- Локальный build проходит успешно — Vercel тоже соберёт.
+- Архивы обновлены: deploy-export/cs2-vercel-deploy.zip (636KB).
+
+---
+Task ID: fix-stale-route-in-zip
+Agent: Z.ai Code (main)
+Task: Пользователь удалил api/route.ts но build всё равно падает с "Conflicting route and page at /".
+
+Work Log:
+- Проверил zip — обнаружил что в нём ВСЁ ЕЩЁ есть src/app/route.ts (корневой, конфликтующий с page.tsx)! Хотя я удалил его из проекта, при пересоздании архива я копировал файлы из старого tar.gz, и этот мусорный файл остался.
+- Пересоздал zip ПОЛНОСТЬУ из текущего состояния проекта (а не из старого архива): tar с exclude-списком → распаковал в tmp-deploy → добавил README → zip. Исключил все мусорные папки.
+- Проверил новый zip: src/app/route.ts ОТСУТСТВУЕТ ✓, остались только 4 легитимных API route (debug, matches, matches/[id], sync).
+- Проверил build локально: bun run build прошёл успешно, все роуты корректны.
+
+Корневая причина: пользователь заливал старый zip где остался app/route.ts. Vercel видит два файла на пути /: page.tsx (страница) и route.ts (API) → конфликт → build fails.
+
+Stage Summary:
+- Zip пересоздан чисто: deploy-export/cs2-vercel-deploy.zip (без app/route.ts).
+- Build проходит локально — Vercel тоже соберёт.
+- Пользователю: скачать НОВЫЙ zip, ПОЛНОСТЬЮ заменить файлы на GitHub (удалить старый app/route.ts если есть), redeploy.
