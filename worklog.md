@@ -147,3 +147,76 @@ Stage Summary:
 - Твои 8 оригинальных радаров установлены и работают в Live Match view.
 - БД осталась SQLite (менять не нужно для z.ai деплоя).
 - Проект готов к использованию через z.ai preview.
+
+---
+Task ID: prepare-vercel-deploy-export
+Agent: Z.ai Code (main)
+Task: Пользователь хочет деплоить на Vercel (z.ai preview падает). Скачал workspace tar (35MB) — но там лишнее. Нужно: переключить БД на Postgres + создать чистый архив проекта для Vercel.
+
+Work Log:
+- Переключил Prisma schema с sqlite на postgresql (provider = "postgresql") — обязательно для Vercel (SQLite не работает на serverless).
+- Создал чистый экспорт проекта: deploy-export/cs2-vercel-deploy.zip (627KB) и cs2-project-for-vercel.tar.gz (599KB). Исключил: node_modules, .next, dev.log, db/, upload/, skills/, download/, screenshots, .git, mini-services, agent-ctx, tool-results.
+- В архиве 114 файлов: исходники (src/, prisma/, public/radars/, package.json, tsconfig, next.config, eslint, Caddyfile), + README-DEPLOY.md с пошаговой инструкцией деплоя на Vercel.
+- README-DEPLOY.md содержит: быстрый старт (распакуй → GitHub → Vercel → Postgres → prisma db push), структуру проекта, troubleshooting таблицу.
+- postinstall: prisma generate уже в package.json (с прошлого этапа).
+
+Stage Summary:
+- Проект переключён на Postgres, готов к Vercel.
+- Чистый архив для деплоя: deploy-export/cs2-vercel-deploy.zip (627KB) — содержит только нужное + инструкцию.
+- Пользователю: скачать cs2-vercel-deploy.zip, распаковать, залить на GitHub, импортировать в Vercel, создать Postgres базу, prisma db push, готово.
+
+---
+Task ID: neon-setup-guide
+Agent: Z.ai Code (main)
+Task: Пользователь не понимает как подключить Neon DB к Vercel сайту. Статистика сбрасывается при обновлении сайта (SQLite на Vercel стирается). Нужна максимально простая пошаговая инструкция.
+
+Work Log:
+- Создал NEON-SETUP-RU.md — максимально подробная пошаговая инструкция для новичка (на русском):
+  - Шаг 1: Создать базу на neon.tech (бесплатно, 2 минуты)
+  - Шаг 2: Скопировать connection string (postgresql://...)
+  - Шаг 3: Добавить DATABASE_URL в Vercel → Settings → Environment Variables
+  - Шаг 4: Создать таблицы — готовый SQL-код (CREATE TABLE MatchRecord + индексы), вставить в Neon SQL Editor и нажать Run
+  - Шаг 5: Redeploy на Vercel
+  - Шаг 6: Проверить (симулировать матч → обновить → матч остался)
+  - Чек-лист + troubleshooting (PrismaClientInitializationError, table does not exist, данные пропадают)
+- Обновил README-DEPLOY.md — добавил warning сверху со ссылкой на NEON-SETUP-RU.md для тех у кого статистика сбрасывается.
+- Пересоздал cs2-vercel-deploy.zip (630KB) с обеими инструкциями внутри.
+
+Stage Summary:
+- Проблема "статистика сбрасывается при обновлении сайта" = SQLite на Vercel стирается при деплое.
+- Решение: подключить Neon Postgres (бесплатно) — пошаговая инструкция в NEON-SETUP-RU.md.
+- Ключевое: после подключения DATABASE_URL нужно СОЗДАТЬ ТАБЛИЦЫ через готовый SQL в Neon SQL Editor (Шаг 4), иначе будет ошибка "table does not exist".
+- Архив cs2-vercel-deploy.zip обновлён, содержит обе инструкции.
+
+---
+Task ID: fix-only-last-match-saved
+Agent: Z.ai Code (main)
+Task: Пользователь: "сохраняет только один последний матч, надо чтоб все сохраняло и стату всех".
+
+Work Log:
+- Нашёл КОРНЕВУЮ ПРИЧИНУ через анализ dev log + localStorage + DB state. Было ДВА бага:
+
+  БАГ 1 (главный): uid() в simulation.js использует in-memory счётчик `uidCounter` который сбрасывается при каждой перезагрузке страницы. Матч №1 всегда получал id `match_1`, матч №2 → `match_2`. После reload счётчик снова 0 → новый матч опять `match_1` → upsert в БД перезаписывал старый `match_1`. Поэтому виден только последний.
+  ФИКС: в FINISH_MATCH (App.jsx reducer) генерирую уникальный ID `match_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}` поверх того что выдал uid(). Не трогал оригинальный simulation.js.
+
+  БАГ 2: hydration effect использовал SET_HISTORY (полная замена state.matchHistory данными из БД). Если hydration срабатывал ПОЗЛЕ того как пользователь сымулировал матч (race condition, особенно в React StrictMode dev), он затирал новый матч данными из БД (где его ещё нет).
+  ФИКС: добавил reducer action MERGE_HISTORY — объединяет БД-матчи с локальными по ID (БД приоритет, локальные-only сохраняются). Hydration теперь использует MERGE_HISTORY вместо SET_HISTORY + guard через dbHydratedRef (срабатывает один раз).
+
+  БАГ 3 (связанный): persist effect при quota error сохранял trimmed snapshot с matchHistory:[] → loadStoredSnapshot возвращал пустую историю → до гидратации пользователь видел 0 матчей. 
+  ФИКС: persist при quota error берёт matchHistory из ПРЕДЫДУЩЕГО localStorage (не затирает пустым).
+
+  БАГ 4: sync effect (mergeOnly) — уже был исправлен в прошлом этапе (sync только upsert, не удаляет). Подтверждено работает.
+
+Проверка через agent-browser (полный цикл):
+1. Очистил БД + localStorage, reload
+2. Сымитировал 3 матча подряд (Instant) → DB count рос: 1 → 2 → 3, все с уникальными ID (match_mqqwoluk_ubew5i, match_mqqwnwmc_bxs2zz, match_mqqwp4rv_yjwym8)
+3. Reload страницы → UI History показывает 4 матча = DB count 4 (ничего не потерялось!)
+4. Сымитировал 5-й матч после reload → DB count вырос до 5 (match_mqqwqs8o_vybs70)
+5. Stats → Players: агрегирует по всем 5 матчам — ropz 5 series 282 rounds 271K rating 1.34, KSCERATO 1.26, flameZ 1.11, и т.д.
+6. Overview: 5 Matches, 12 Maps, 1 Tournament, 10 Players, 5 Online
+7. Нет ошибок в консоли
+
+Stage Summary:
+- Проблема "сохраняется только последний матч" решена: уникальные ID + merge hydration + safe persist.
+- Все матчи теперь сохраняются в БД навсегда, переживают reload, статистика агрегирует по всем.
+- Оригинальный simulation.js не изменён (фикс только в App.jsx reducer + API sync).
