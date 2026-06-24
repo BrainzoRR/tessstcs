@@ -84,6 +84,57 @@ import {
   sanitizeMatchHistoryEntries,
 } from "@/lib/archiveStats";
 
+// Strip heavy fields from a match entry BEFORE sending it to the server.
+// Vercel rejects HTTP request bodies larger than 4.5MB with 413 BEFORE the
+// server code runs, so server-side stripping (db-sync.ts) is too late for
+// BO5 matches (2-5MB). This mirrors the server-side strip so the wire
+// payload stays ~30-50KB per match even for BO5. UI reads the same slim
+// shape from the DB anyway, so nothing is lost.
+const HEAVY_MAP_KEYS_CLIENT = new Set([
+  "teamAPlayers",
+  "teamBPlayers",
+  "teamAState",
+  "teamBState",
+]);
+const HEAVY_ROUND_KEYS_CLIENT = new Set([
+  "logs",
+  "timeline",
+  "startLoadouts",
+  "loadouts",
+  "playerRoundStats",
+  "preRoundExpectancy",
+  "spectatorLeaders",
+]);
+function slimEntryForSync(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  const data = entry.data;
+  if (!data || typeof data !== "object") return entry;
+  const slimmedData = { ...data };
+  if (Array.isArray(slimmedData.maps)) {
+    slimmedData.maps = slimmedData.maps.map((m) => {
+      if (!m || typeof m !== "object") return m;
+      const rest = {};
+      for (const key of Object.keys(m)) {
+        if (HEAVY_MAP_KEYS_CLIENT.has(key)) continue;
+        rest[key] = m[key];
+      }
+      if (Array.isArray(rest.rounds)) {
+        rest.rounds = rest.rounds.map((r) => {
+          if (!r || typeof r !== "object") return r;
+          const slim = {};
+          for (const key of Object.keys(r)) {
+            if (HEAVY_ROUND_KEYS_CLIENT.has(key)) continue;
+            slim[key] = r[key];
+          }
+          return slim;
+        });
+      }
+      return rest;
+    });
+  }
+  return { ...entry, data: slimmedData };
+}
+
 const NAV_ITEMS = [
   { id: "home", label: "Home", icon: House },
   { id: "teams", label: "Teams", icon: Users },
@@ -1392,10 +1443,13 @@ function App() {
           for (const entry of localOnly) {
             if (!entry?.id) continue;
             try {
+              const slim = slimEntryForSync(entry);
+              const payload = JSON.stringify({ entry: slim });
+              console.log(`[db] force-sync upsert ${entry.id} | payload ${payload.length} bytes`);
               const r = await fetch("/api/matches", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ entry }),
+                body: payload,
               });
               if (!r.ok) console.error(`[db] force-sync upsert failed for ${entry.id}: HTTP ${r.status}`);
             } catch (e) {
@@ -1430,15 +1484,17 @@ function App() {
       for (const entry of entries) {
         if (!entry?.id) continue;
         try {
+          const slim = slimEntryForSync(entry);
+          const payload = JSON.stringify({ entry: slim });
           const res = await fetch("/api/matches", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ entry }),
+            body: payload,
           });
           if (res.ok) ok += 1;
           else {
             fail += 1;
-            console.error(`[db] upsert failed for ${entry.id}: HTTP ${res.status}`);
+            console.error(`[db] upsert failed for ${entry.id}: HTTP ${res.status} | payload was ${payload.length} bytes`);
           }
         } catch (err) {
           fail += 1;

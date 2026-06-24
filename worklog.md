@@ -200,3 +200,26 @@ Stage Summary:
 - 500 error исправлен: schema = postgresql (совпадает с Neon DATABASE_URL).
 - Архив: deploy-export/cs2-vercel-deploy.zip (631KB) со всеми 11 фиксами.
 - Пользователю: скачать zip, ПОЛНОСТЬЮ заменить файлы на GitHub (удалить старую prisma/schema.prisma с sqlite!), redeploy.
+
+---
+Task ID: fix-bo5-413
+Agent: Z.ai Code (main)
+Task: Пользователь: BO5 матчи не грузятся в БД (HTTP 413), остальные грузятся. "я понял, бо5 матчи в бд не грузит".
+
+Work Log:
+- Нашёл причину: BO5 = 5 карт × ~24 раунда. Каждый round в map.rounds содержал тяжёлые поля: logs (30+ событий), timeline (20+), startLoadouts, loadouts (buildPlayerPanel для 5 игроков × 2 команды), playerRoundStats, spectatorLeaders. BO5 матч = 2.64MB → превышает Vercel 4.5MB лимит.
+- Предыдущий strip удалял только teamAPlayers/teamBPlayers, но НЕ rounds internals.
+- ФИКС: расширил strip в db-sync.ts entryToRow:
+  - HEAVY_MAP_KEYS: teamAPlayers, teamBPlayers, teamAState, teamBState
+  - HEAVY_ROUND_KEYS: logs, timeline, startLoadouts, loadouts, playerRoundStats, preRoundExpectancy, spectatorLeaders
+  - Оставил: mapName, score, winnerKey, halfBreakdown, roundTypeWins, rounds (с winnerKey/winnerSide/roundType/scoreAfter/reason/bombPlanted/plantSite)
+- Добавил логирование размера в /api/matches POST: console.log dataJson size + mapsLabel.
+- Unit-тест BO5: 2.64MB → 42.4KB (98.4% reduction). Vercel 4.5MB limit OK. teamAPlayers removed ✓, rounds[0].logs removed ✓, rounds[0].winnerKey kept ✓.
+- Build проходит. Lint чистый.
+- Пересоздал архив (632KB).
+
+Stage Summary:
+- BO5 413 исправлен: расширенный strip удаляет logs/timeline/loadouts/playerRoundStats из каждого раунда.
+- BO5 матч: 2.64MB → 42KB. 300+ BO5 матчей = ~12MB (Neon free 0.5GB, запас 40x).
+- Архив: deploy-export/cs2-vercel-deploy.zip (632KB) со всеми фиксами.
+- Пользователю: скачать, заменить на GitHub, redeploy. BO5 теперь сохраняются.
