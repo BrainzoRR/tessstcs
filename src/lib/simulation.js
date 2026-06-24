@@ -2,13 +2,18 @@ export const STORAGE_KEY = "cs2sim_state_v1";
 
 export const MAP_POOL = [
   "Mirage",
-  "Overpass",
+  "Cache",
   "Anubis",
   "Inferno",
   "Nuke",
   "Dust",
   "Ancient",
 ];
+
+// Maps that exist in MAP_CONFIGS but are not in the active MAP_POOL.
+// Overpass was rotated out when Cache returned to the pool; kept here so it
+// can be re-enabled by simply moving it back into MAP_POOL.
+export const RESERVE_MAPS = ["Overpass"];
 
 export const REGIONS = ["EU", "NA", "CIS", "APAC", "BR", "MENA"];
 
@@ -111,6 +116,21 @@ export const MAP_CONFIGS = {
     lurkWeight: 1.0,
     gameSenseWeight: 1.0,
   },
+  Cache: {
+    // Cache is mildly T-sided: mid control opens A main / squeaky / B halls
+    // and CT rotations are long through vents/highway. Strong AWP map (long
+    // A main + mid angles), entry fraggers thrive on fast A/Squeaky hits,
+    // lurkers use vents/z-connector. Utility matters for A executes (smokes
+    // for highway/quad, mollies for toxic/sandbags).
+    baseT: 0.52,
+    baseCT: 0.48,
+    traits: ["Mid control decisive", "Long A main duels", "Vents lurk lanes", "Fast B halls hits"],
+    awpWeight: 1.1,
+    utilityWeight: 1.06,
+    entryWeight: 1.06,
+    lurkWeight: 1.08,
+    gameSenseWeight: 1.04,
+  },
 };
 
 export const MAP_ZONES = {
@@ -148,6 +168,11 @@ export const MAP_ZONES = {
     A: ["A main", "heaven", "bridge", "site"],
     B: ["canal", "pillar", "site", "bridge"],
     Mid: ["mid", "connector", "water", "top mid"],
+  },
+  Cache: {
+    A: ["A main", "squeaky", "highway", "quad", "site"],
+    B: ["B halls", "checkers", "toxic", "site"],
+    Mid: ["mid", "vents", "z-connector", "highway"],
   },
 };
 
@@ -278,6 +303,28 @@ const MAP_ROUTE_PRESETS = {
     Mid: { entry: ["top mid", "mid"], hold: ["connector", "water"], support: ["bridge"] },
     lurk: ["connector", "water", "bridge"],
   },
+  Cache: {
+    A: {
+      entry: ["A main", "squeaky"],
+      hold: ["quad", "highway", "site"],
+      support: ["mid", "highway"],
+      retake: ["highway", "squeaky", "site"],
+      postPlant: ["A main", "quad", "site"],
+    },
+    B: {
+      entry: ["B halls", "checkers"],
+      hold: ["toxic", "site"],
+      support: ["z-connector", "vents"],
+      retake: ["z-connector", "B halls", "site"],
+      postPlant: ["B halls", "checkers", "toxic"],
+    },
+    Mid: {
+      entry: ["mid"],
+      hold: ["vents", "z-connector", "highway"],
+      support: ["mid", "vents"],
+    },
+    lurk: ["vents", "z-connector", "highway"],
+  },
 };
 
 const DEFAULT_PHASE_WINDOWS = {
@@ -378,6 +425,23 @@ const ZONE_TIME_WINDOWS = {
     pillar: [42, 115],
     heaven: [40, 115],
   },
+  Cache: {
+    // Timings (seconds into the round) when each zone is realistically contested.
+    // A main is the long default — early presence + late post-plant holds.
+    // Squeaky opens slightly later (doorbang timing). Mid is fast (vents control).
+    // B halls is a late execute lane. Vents/z-connector are lurk timings.
+    "A main": [14, 58],
+    squeaky: [20, 64],
+    mid: [12, 44],
+    vents: [24, 78],
+    highway: [30, 90],
+    "z-connector": [32, 95],
+    checkers: [40, 110],
+    "B halls": [26, 72],
+    quad: [42, 115],
+    toxic: [44, 115],
+    site: [44, 115],
+  },
 };
 
 const TIGHT_ZONE_TOKENS = [
@@ -406,6 +470,14 @@ const TIGHT_ZONE_TOKENS = [
   "mini",
   "hut",
   "fork",
+  // Cache tight zones
+  "squeaky",
+  "quad",
+  "toxic",
+  "checkers",
+  "vents",
+  "highway",
+  "z-connector",
 ];
 
 const LARGE_ZONE_TOKENS = [
@@ -427,6 +499,9 @@ const LARGE_ZONE_TOKENS = [
   "monster",
   "catwalk",
   "tunnels",
+  // Cache large zones
+  "A main",
+  "B halls",
 ];
 
 function uniqueZones(zones) {
@@ -1601,9 +1676,9 @@ function createCurrentSeedTeams() {
         tacticalRating: 94,
         motivationRating: 92,
         mapKnowledge: 93,
-        preferredMaps: ["Nuke", "Inferno", "Mirage", "Anubis", "Dust", "Ancient", "Overpass"],
+        preferredMaps: ["Nuke", "Inferno", "Mirage", "Anubis", "Dust", "Ancient", "Cache"],
       },
-      preferredMaps: ["Nuke", "Inferno", "Mirage", "Anubis", "Dust", "Ancient", "Overpass"],
+      preferredMaps: ["Nuke", "Inferno", "Mirage", "Anubis", "Dust", "Ancient", "Cache"],
       players: [
         makeSeedPlayer("ZywOo", "AWPer", { aim: 99, gameSense: 97, clutch: 96, utility: 78, entry: 87, consistency: 97 }, { nationality: "France", age: 25 }),
         makeSeedPlayer("ropz", "Lurker", { aim: 95, gameSense: 95, clutch: 93, utility: 78, entry: 82, consistency: 96 }, { nationality: "Estonia", age: 26 }),
@@ -1625,9 +1700,9 @@ function createCurrentSeedTeams() {
         tacticalRating: 88,
         motivationRating: 86,
         mapKnowledge: 87,
-        preferredMaps: ["Anubis", "Dust", "Mirage", "Nuke", "Inferno", "Ancient", "Overpass"],
+        preferredMaps: ["Anubis", "Dust", "Mirage", "Nuke", "Inferno", "Ancient", "Cache"],
       },
-      preferredMaps: ["Anubis", "Dust", "Mirage", "Nuke", "Inferno", "Ancient", "Overpass"],
+      preferredMaps: ["Anubis", "Dust", "Mirage", "Nuke", "Inferno", "Ancient", "Cache"],
       players: [
         makeSeedPlayer("FalleN", "IGL", { aim: 84, gameSense: 96, clutch: 88, utility: 86, entry: 76, consistency: 89 }, { isCaptain: true, nationality: "Brazil", age: 35 }),
         makeSeedPlayer("molodoy", "AWPer", { aim: 90, gameSense: 84, clutch: 80, utility: 70, entry: 78, consistency: 83 }, { nationality: "Kazakhstan", age: 20 }),
@@ -1649,9 +1724,9 @@ function createCurrentSeedTeams() {
         tacticalRating: 90,
         motivationRating: 88,
         mapKnowledge: 89,
-        preferredMaps: ["Mirage", "Nuke", "Dust", "Inferno", "Ancient", "Anubis", "Overpass"],
+        preferredMaps: ["Mirage", "Nuke", "Dust", "Inferno", "Ancient", "Anubis", "Cache"],
       },
-      preferredMaps: ["Mirage", "Nuke", "Dust", "Inferno", "Ancient", "Anubis", "Overpass"],
+      preferredMaps: ["Mirage", "Nuke", "Dust", "Inferno", "Ancient", "Anubis", "Cache"],
       players: [
         makeSeedPlayer("Brollan", "IGL", { aim: 88, gameSense: 92, clutch: 84, utility: 82, entry: 88, consistency: 88 }, { isCaptain: true, nationality: "Sweden", age: 23 }),
         makeSeedPlayer("torzsi", "AWPer", { aim: 92, gameSense: 88, clutch: 83, utility: 70, entry: 79, consistency: 90 }, { nationality: "Hungary", age: 24 }),
@@ -1673,9 +1748,9 @@ function createCurrentSeedTeams() {
         tacticalRating: 94,
         motivationRating: 91,
         mapKnowledge: 92,
-        preferredMaps: ["Mirage", "Dust", "Nuke", "Inferno", "Ancient", "Anubis", "Overpass"],
+        preferredMaps: ["Mirage", "Dust", "Nuke", "Inferno", "Ancient", "Anubis", "Cache"],
       },
-      preferredMaps: ["Mirage", "Dust", "Nuke", "Inferno", "Ancient", "Anubis", "Overpass"],
+      preferredMaps: ["Mirage", "Dust", "Nuke", "Inferno", "Ancient", "Anubis", "Cache"],
       players: [
         makeSeedPlayer("kyxsan", "IGL", { aim: 82, gameSense: 94, clutch: 84, utility: 88, entry: 76, consistency: 88 }, { isCaptain: true, nationality: "North Macedonia", age: 25 }),
         makeSeedPlayer("NiKo", "Entry Fragger", { aim: 98, gameSense: 95, clutch: 93, utility: 74, entry: 98, consistency: 95 }, { nationality: "Bosnia and Herzegovina", age: 29 }),

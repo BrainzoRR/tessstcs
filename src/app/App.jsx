@@ -307,6 +307,7 @@ const RADAR_ASSETS = {
   Dust: { upper: "/radars/dust2.webp" },
   Ancient: { upper: "/radars/ancient.webp" },
   Anubis: { upper: "/radars/anubis.webp" },
+  Cache: { upper: "/radars/cache.webp" },
 };
 
 const RADAR_VIEWBOXES = {
@@ -331,6 +332,9 @@ const RADAR_VIEWBOXES = {
   },
   Anubis: {
     upper: { left: 0.16, top: 0.05, width: 0.74, height: 0.91 },
+  },
+  Cache: {
+    upper: { left: 0.04, top: 0.04, width: 0.92, height: 0.92 },
   },
 };
 
@@ -394,6 +398,13 @@ const RADAR_SITE_FALLBACKS = {
     A: radarAnchors([[0.24, 0.8], [0.22, 0.56], [0.36, 0.39]]),
     B: radarAnchors([[0.84, 0.19], [0.81, 0.19], [0.73, 0.3]]),
     Mid: radarAnchors([[0.46, 0.74], [0.51, 0.53], [0.57, 0.64]]),
+  },
+  // Cache layout (de_cache CS2): A site top-left, B site bottom-right, Mid center.
+  // Coordinates are normalized 0..1 on the radar image.
+  Cache: {
+    A: radarAnchors([[0.28, 0.30], [0.32, 0.26], [0.24, 0.34]]),
+    B: radarAnchors([[0.70, 0.72], [0.74, 0.68], [0.66, 0.76]]),
+    Mid: radarAnchors([[0.48, 0.50], [0.52, 0.46], [0.44, 0.54]]),
   },
 };
 
@@ -494,6 +505,25 @@ const RADAR_ZONE_POSITIONS = {
     connector: radarAnchors([[0.55, 0.44], [0.52, 0.43]]),
     water: radarAnchors([[0.57, 0.64], [0.54, 0.67]]),
     "top mid": radarAnchors([[0.46, 0.74], [0.43, 0.71]]),
+  },
+  // Cache zone positions — realistic de_cache (CS2) layout.
+  // A site occupies the top-left quadrant; B site the bottom-right; Mid runs
+  // through the center with vents/highway/z-connector as rotational lanes.
+  Cache: {
+    "A main": radarAnchors([[0.12, 0.34], [0.16, 0.38], [0.20, 0.40]]),
+    squeaky: radarAnchors([[0.22, 0.22], [0.24, 0.18]]),
+    highway: radarAnchors([[0.40, 0.32], [0.42, 0.36]]),
+    quad: radarAnchors([[0.32, 0.30], [0.34, 0.34]]),
+    "site::A": radarAnchors([[0.28, 0.30], [0.30, 0.28], [0.26, 0.32]]),
+    "B halls": radarAnchors([[0.82, 0.58], [0.78, 0.62], [0.84, 0.54]]),
+    checkers: radarAnchors([[0.62, 0.62], [0.64, 0.66]]),
+    toxic: radarAnchors([[0.72, 0.78], [0.70, 0.80]]),
+    "site::B": radarAnchors([[0.70, 0.72], [0.72, 0.70], [0.68, 0.74]]),
+    mid: radarAnchors([[0.48, 0.50], [0.52, 0.46], [0.44, 0.54]]),
+    vents: radarAnchors([[0.40, 0.60], [0.42, 0.64]]),
+    "z-connector": radarAnchors([[0.58, 0.58], [0.60, 0.54]]),
+    "forklift": radarAnchors([[0.34, 0.40], [0.36, 0.42]]),
+    "sandbags": radarAnchors([[0.30, 0.36], [0.28, 0.38]]),
   },
 };
 
@@ -618,6 +648,25 @@ const RADAR_ZONE_ALIASES = {
     "bridge::a": "Bridge",
     "bridge::b": "Bridge",
     bridge: "Bridge",
+    "site::a": "A Site",
+    "site::b": "B Site",
+  },
+  Cache: {
+    "a main": "A Main",
+    "main": "A Main",
+    squeaky: "Squeaky",
+    highway: "Highway",
+    quad: "Quad",
+    mid: "Mid",
+    vents: "Vents",
+    "z-connector": "Z-Connector",
+    "z connector": "Z-Connector",
+    checkers: "Checkers",
+    "b halls": "B Halls",
+    halls: "B Halls",
+    toxic: "Toxic",
+    forklift: "Forklift",
+    sandbags: "Sandbags",
     "site::a": "A Site",
     "site::b": "B Site",
   },

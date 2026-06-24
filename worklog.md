@@ -223,3 +223,22 @@ Stage Summary:
 - BO5 матч: 2.64MB → 42KB. 300+ BO5 матчей = ~12MB (Neon free 0.5GB, запас 40x).
 - Архив: deploy-export/cs2-vercel-deploy.zip (632KB) со всеми фиксами.
 - Пользователю: скачать, заменить на GitHub, redeploy. BO5 теперь сохраняются.
+
+---
+Task ID: fix-bo5-413-client-side-strip
+Agent: Z.ai Code (main)
+Task: Пользователь: BO5 всё ещё не сейвит (413), хотя серверный strip был добавлен. BO3/BO1 работают.
+
+Work Log:
+- Понял причину: 413 происходит на уровне Vercel HTTP gateway ДО того как серверный код выполняется. Мой strip в db-sync.ts entryToRow срабатывал уже ПОСЛЕ получения body — но Vercel отклонял запрос раньше. BO5 payload = 2-5MB, превышал 4.5MB лимит на транспортном уровне.
+- ФИКС: добавил КЛИЕНТСКИЙ strip в App.jsx — функция slimEntryForSync(entry) которая вырезает teamAPlayers/teamBPlayers/teamAState/teamBState из maps + logs/timeline/startLoadouts/loadouts/playerRoundStats/preRoundExpectancy/spectatorLeaders из rounds ПЕРЕД отправкой на сервер. Применил в обоих местах: sync effect (one-by-one) и force-sync (hydration).
+- Добавил логирование размера payload: console.log "[db] force-sync upsert ID | payload N bytes" и при ошибке "HTTP 413 | payload was N bytes" — теперь в Console видно реальный размер отправляемого запроса.
+- Серверный strip в db-sync.ts оставил как double-safety (на случай если клиентский пропустит).
+- Build проходит. Lint чистый.
+- Пересоздал архив (633KB). Проверил: slimEntryForSync = 3 (определение + 2 использования), HEAVY_ROUND_KEYS_CLIENT = 2.
+
+Stage Summary:
+- BO5 413 исправлен: strip теперь на клиенте ДО отправки, payload BO5 = 2-5MB → ~40KB.
+- В Console видно "[db] sync: upserting N match(es)" и размер каждого payload.
+- Архив: deploy-export/cs2-vercel-deploy.zip (633KB).
+- Пользователю: скачать, заменить на GitHub, redeploy. BO5 теперь сохранятся.
