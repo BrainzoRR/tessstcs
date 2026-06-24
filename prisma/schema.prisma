@@ -1,0 +1,64 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // PostgreSQL is required for Vercel/Neon deployments. SQLite does NOT work
+  // on serverless platforms (read-only filesystem wipes the DB file on every
+  // deploy). For local development, set DATABASE_URL to either a local
+  // postgres instance or your Neon connection string in .env.
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Saved CS2 match with full per-player statistics.
+/// Filterable columns are stored explicitly; the complete results
+/// payload (maps, players, highlights...) is kept in dataJson.
+model MatchRecord {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+
+  /// ISO timestamp of when the match was finished / saved
+  finishedAt      DateTime @default(now())
+  /// YYYY-MM-DD — the competitive date of the match (used for period filters)
+  matchDate       String
+
+  /// Tournament metadata
+  tournamentName  String
+  stage           String
+  eventType       String // "Online" | "LAN"
+  format          String // "BO1" | "BO3" | "BO5"
+
+  /// Teams (denormalised for fast filtering / display)
+  teamAName       String
+  teamBName       String
+  teamATag        String
+  teamBTag        String
+
+  /// Series result
+  seriesScoreA    Int
+  seriesScoreB    Int
+  winnerKey       String // "teamA" | "teamB"
+  winnerName      String
+  mvpNickname     String?
+
+  /// Comma-separated list of maps played (for quick filtering / display)
+  mapsLabel       String
+
+  /// Whether the match is counted in aggregated statistics
+  includedInStats Boolean  @default(true)
+
+  /// Full results payload (maps, players, highlights...) as JSON string
+  dataJson        String
+
+  @@index([tournamentName])
+  @@index([stage])
+  @@index([eventType])
+  @@index([matchDate])
+  @@index([teamAName])
+  @@index([teamBName])
+  @@index([includedInStats])
+}
