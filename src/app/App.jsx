@@ -402,9 +402,9 @@ const RADAR_SITE_FALLBACKS = {
   // Cache layout (de_cache CS2): A site top-left, B site bottom-right, Mid center.
   // Coordinates verified against the actual radar image.
   Cache: {
-    A: radarAnchors([[0.32, 0.22], [0.30, 0.20], [0.34, 0.24]]),
-    B: radarAnchors([[0.65, 0.55], [0.63, 0.57], [0.67, 0.53]]),
-    Mid: radarAnchors([[0.50, 0.45], [0.52, 0.43], [0.48, 0.47]]),
+    A: radarAnchors([[0.25, 0.25], [0.23, 0.27], [0.27, 0.23]]),
+    B: radarAnchors([[0.75, 0.75], [0.73, 0.77], [0.77, 0.73]]),
+    Mid: radarAnchors([[0.50, 0.50], [0.48, 0.48], [0.52, 0.52]]),
   },
 };
 
@@ -507,24 +507,31 @@ const RADAR_ZONE_POSITIONS = {
     "top mid": radarAnchors([[0.46, 0.74], [0.43, 0.71]]),
   },
   // Cache zone positions — verified against the actual de_cache radar image.
-  // A site is top-left (~0.32, 0.22), B site is bottom-right (~0.65, 0.55),
-  // Mid is dead center. Death markers now land on real map geometry instead
-  // of floating in empty space.
+  // CRITICAL: T approach zones (A main, B halls) are placed FAR from the
+  // bombsites (towards T spawn), while CT hold zones (site, quad, toxic)
+  // sit on the bombsites themselves. This matches real Cache geography so
+  // death markers don't cluster on top of each other or land on the wrong
+  // side of the map.
   Cache: {
-    "A main": radarAnchors([[0.30, 0.35], [0.28, 0.37], [0.32, 0.33]]),
-    squeaky: radarAnchors([[0.38, 0.30], [0.36, 0.32]]),
-    highway: radarAnchors([[0.45, 0.40], [0.43, 0.42], [0.47, 0.38]]),
-    quad: radarAnchors([[0.35, 0.26], [0.37, 0.28]]),
-    "site::A": radarAnchors([[0.32, 0.22], [0.30, 0.20], [0.34, 0.24]]),
-    "B halls": radarAnchors([[0.70, 0.58], [0.68, 0.60], [0.72, 0.56]]),
-    checkers: radarAnchors([[0.68, 0.52], [0.66, 0.54]]),
-    toxic: radarAnchors([[0.72, 0.62], [0.70, 0.64]]),
-    "site::B": radarAnchors([[0.65, 0.55], [0.63, 0.57], [0.67, 0.53]]),
-    mid: radarAnchors([[0.50, 0.45], [0.48, 0.47], [0.52, 0.43]]),
-    vents: radarAnchors([[0.55, 0.48], [0.53, 0.50], [0.57, 0.46]]),
-    "z-connector": radarAnchors([[0.60, 0.50], [0.58, 0.52], [0.62, 0.48]]),
-    "forklift": radarAnchors([[0.34, 0.30], [0.36, 0.32]]),
-    "sandbags": radarAnchors([[0.31, 0.25], [0.33, 0.27]]),
+    // A site (CT defense) — top-left quadrant, on the bombsite
+    "site::A": radarAnchors([[0.25, 0.25], [0.23, 0.27], [0.27, 0.23]]),
+    quad: radarAnchors([[0.30, 0.30], [0.28, 0.32]]),
+    "forklift": radarAnchors([[0.28, 0.28], [0.30, 0.26]]),
+    "sandbags": radarAnchors([[0.26, 0.28], [0.24, 0.30]]),
+    // A approaches (T attack) — towards T spawn, far from A site
+    "A main": radarAnchors([[0.15, 0.45], [0.13, 0.43], [0.17, 0.47]]),
+    squeaky: radarAnchors([[0.20, 0.40], [0.18, 0.42]]),
+    // B site (CT defense) — bottom-right quadrant, on the bombsite
+    "site::B": radarAnchors([[0.75, 0.75], [0.73, 0.77], [0.77, 0.73]]),
+    toxic: radarAnchors([[0.70, 0.70], [0.72, 0.68]]),
+    checkers: radarAnchors([[0.65, 0.65], [0.67, 0.63]]),
+    // B approaches (T attack) — towards T spawn, far from B site
+    "B halls": radarAnchors([[0.85, 0.55], [0.83, 0.53], [0.87, 0.57]]),
+    "z-connector": radarAnchors([[0.80, 0.60], [0.78, 0.58]]),
+    // Mid (center) — neutral contest zone
+    mid: radarAnchors([[0.50, 0.50], [0.48, 0.48], [0.52, 0.52]]),
+    vents: radarAnchors([[0.45, 0.45], [0.43, 0.47]]),
+    highway: radarAnchors([[0.40, 0.40], [0.42, 0.38]]),
   },
 };
 
