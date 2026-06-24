@@ -18,7 +18,30 @@ interface MatchHistoryEntryInput {
 
 /** Convert an entry (with full `data` payload) into a Prisma MatchRecord row. */
 export function entryToRow(entry: MatchHistoryEntryInput) {
-  const data = (entry.data ?? {}) as Record<string, any>;
+  const rawData = (entry.data ?? {}) as Record<string, any>;
+
+  // Strip the heavy per-map live-state player objects before serializing.
+  // The original simulation.js includes `teamAPlayers` / `teamBPlayers` in
+  // each map — these are the FULL live match-state objects (with money, hp,
+  // every attribute, per-round accumulators, etc.) and bloat a single match
+  // to 1-2.5MB. That blows past Vercel's 4.5MB request body limit and is
+  // never read back by the UI (which only uses the aggregated `players`
+  // array + map metadata). Removing them shrinks a match to ~20-40KB.
+  const data: Record<string, any> = { ...rawData };
+  if (Array.isArray(data.maps)) {
+    data.maps = data.maps.map((m: any) => {
+      if (!m || typeof m !== "object") return m;
+      // Shallow-copy the map without the two heavy player arrays.
+      const rest: Record<string, any> = {};
+      for (const key of Object.keys(m)) {
+        if (key !== "teamAPlayers" && key !== "teamBPlayers") {
+          rest[key] = m[key];
+        }
+      }
+      return rest;
+    });
+  }
+
   const tournament = data.tournament ?? {};
   const teamA = data.teamA ?? {};
   const teamB = data.teamB ?? {};

@@ -11,16 +11,11 @@ interface SyncEntry {
 
 /**
  * POST /api/sync
- * Body: { entries: SyncEntry[], mergeOnly?: boolean }
- *
- * Default (mergeOnly=true): upsert every entry sent by the client (add/update
- * by id). Never delete — this is the safe mode used by the autosync effect so
- * a temporarily-empty client matchHistory (e.g. after localStorage quota
- * issues) can never wipe the DB.
- *
- * mergeOnly=false: full reconcile — also delete DB rows whose id is not in the
- * client's list. Used only when the user explicitly clears history or deletes
- * matches (those go through dedicated endpoints instead).
+ * Body: { entries: SyncEntry[] }
+ * Reconciles the DB with the client's full matchHistory:
+ *   - upsert every entry sent by the client (by id)
+ *   - delete DB rows whose id is not in the client's list
+ * Returns the resulting full list of entries (so the client can refresh).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -30,59 +25,40 @@ export async function POST(req: NextRequest) {
       : Array.isArray(body)
         ? body
         : [];
-    const mergeOnly = body?.mergeOnly !== false; // default true (safe)
     const incomingIds = new Set(incoming.map((e) => e?.id).filter(Boolean));
 
-    console.log(`[api/sync] received ${incoming.length} entries (mergeOnly=${mergeOnly})`);
-
     // Upsert all incoming entries
-    let upserted = 0;
     for (const entry of incoming) {
-      if (!entry?.id) {
-        console.log("[api/sync] skipping entry without id");
-        continue;
-      }
-      try {
-        const row = entryToRow(entry);
-        await db.matchRecord.upsert({
-          where: { id: row.id },
-          create: row,
-          update: row,
-        });
-        upserted += 1;
-      } catch (upsertErr) {
-        console.error(`[api/sync] upsert failed for id=${entry.id}:`, upsertErr);
-      }
-    }
-    console.log(`[api/sync] upserted ${upserted}/${incoming.length}`);
-
-    let deleted = 0;
-    if (!mergeOnly) {
-      const allRows = await db.matchRecord.findMany({ select: { id: true } });
-      const toDelete = allRows
-        .map((r) => r.id)
-        .filter((id) => !incomingIds.has(id));
-      if (toDelete.length > 0) {
-        const res = await db.matchRecord.deleteMany({
-          where: { id: { in: toDelete } },
-        });
-        deleted = res.count;
-      }
+      if (!entry?.id) continue;
+      const row = entryToRow(entry);
+      await db.matchRecord.upsert({
+        where: { id: row.id },
+        create: row,
+        update: row,
+      });
     }
 
+    // Delete rows not present in the incoming list
+    const allRows = await db.matchRecord.findMany({ select: { id: true } });
+    const toDelete = allRows
+      .map((r) => r.id)
+      .filter((id) => !incomingIds.has(id));
+    if (toDelete.length > 0) {
+      await db.matchRecord.deleteMany({ where: { id: { in: toDelete } } });
+    }
+
+    // Return the reconciled full list
     const finalRows = await db.matchRecord.findMany({
       orderBy: { finishedAt: "desc" },
     });
     return NextResponse.json({
       ok: true,
       entries: finalRows.map(rowToEntry),
-      synced: upserted,
-      deleted,
-      mergeOnly,
+      synced: incoming.length,
+      deleted: toDelete.length,
     });
   } catch (err) {
     console.error("[api/sync POST]", err);
     return NextResponse.json({ error: "Sync failed" }, { status: 500 });
   }
 }
-

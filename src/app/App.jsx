@@ -875,7 +875,10 @@ function loadStoredSnapshot() {
           teams.some((team) => team.id === parsed.state?.selectedTeamId)
             ? parsed.state?.selectedTeamId
             : teams[0]?.id ?? null,
-        currentMatch: restoredSession.currentMatch,
+        // Never resume an in-progress match across reloads. The Instant-mode
+        // effect would otherwise re-fire on every page load and create
+        // duplicate matches (same teams, new random id, new random result).
+        currentMatch: null,
         resultsData: restoredSession.resultsData,
       },
       setup: sanitizeMatchSetup(parsed.matchSetup, teams),
@@ -973,10 +976,8 @@ function appReducer(state, action) {
       const historyEntry = normalizeHistoryEntry(buildHistoryEntry(results));
       // Override the match id with a globally-unique value. The original
       // simulation.js `uid()` uses a simple in-memory counter that resets to 0
-      // on every page load, so match #1 always becomes `match_1`. That makes
-      // the next simulated match overwrite the previous one in the DB (upsert
-      // by id). Generating a fresh unique id here keeps every saved match as
-      // its own row forever.
+      // on every page load, so match #1 always becomes `match_1` and the next
+      // simulated match overwrites the previous one in the DB (upsert by id).
       const uniqueId = `match_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       historyEntry.id = uniqueId;
       if (historyEntry.data) {
@@ -1336,29 +1337,15 @@ function App() {
     });
     // Persist to localStorage defensively — when the DB holds many matches the
     // full snapshot can exceed the ~5MB localStorage quota. The DB is the
-    // authoritative store, so on quota error we persist a prefs-only snapshot
-    // WITHOUT touching the existing matchHistory (we must never overwrite the
-    // user's saved matches with an empty list). If even the prefs snapshot
-    // doesn't fit, we leave the previous localStorage value untouched.
+    // authoritative store, so it is safe to skip/best-effort the local cache.
     try {
       window.localStorage.setItem(STORAGE_KEY, serialized);
     } catch (quotaErr) {
+      // Try a trimmed snapshot (no matchHistory data) so UI prefs still persist.
       try {
-        const prefsOnly = JSON.stringify({
+        const trimmed = JSON.stringify({
           snapshotVersion: SNAPSHOT_VERSION,
-          // Keep the previously-persisted matchHistory if present so a reload
-          // never loses saved matches before the DB hydration runs.
-          state: {
-            ...state,
-            matchHistory: (() => {
-              try {
-                const prev = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
-                return prev?.state?.matchHistory ?? prev?.matchHistory ?? state.matchHistory ?? [];
-              } catch {
-                return state.matchHistory ?? [];
-              }
-            })(),
-          },
+          state: { ...state, matchHistory: [] },
           matchSetup,
           language,
           siteMode,
@@ -1368,7 +1355,7 @@ function App() {
           soundDesignEnabled,
           lastSavedAt: new Date().toISOString(),
         });
-        window.localStorage.setItem(STORAGE_KEY, prefsOnly);
+        window.localStorage.setItem(STORAGE_KEY, trimmed);
       } catch {
         // give up silently — DB sync still works
       }
@@ -1377,10 +1364,9 @@ function App() {
   }, [state, matchSetup, language, siteMode, liveLayoutMode, livePresentationMode, livePlaybackRate, soundDesignEnabled]);
 
   // ---- Database hydration: load persisted matchHistory from the server ----
-  // Runs ONCE. Uses MERGE_HISTORY (not SET_HISTORY) so any matches the user
-  // already simulated locally this session are preserved — the DB is
-  // authoritative for what it knows about, but local-only entries are kept
-  // and will be synced back to the DB by the sync effect below.
+  // Runs ONCE. Uses MERGE_HISTORY so local-only matches are preserved and
+  // then immediately force-synced to the DB one-by-one (avoids Vercel 4.5MB
+  // body limit that killed batched /api/sync calls with HTTP 413).
   useEffect(() => {
     if (dbHydratedRef.current) return;
     let cancelled = false;
@@ -1394,25 +1380,15 @@ function App() {
         const data = await res.json();
         const dbEntries = Array.isArray(data?.entries) ? data.entries : [];
         if (cancelled) return;
-        // Compute local-only matches (in localStorage but not in DB) so we
-        // can push them to the server immediately after merge. Without this,
-        // matches that exist only locally (e.g. after the DB was wiped) would
-        // never reach the server because the debounce sync only fires on
-        // state.matchHistory changes, and MERGE with the same local entries
-        // may not produce a reference change React detects.
         const dbIds = new Set(dbEntries.map((e) => e?.id).filter(Boolean));
         const localOnly = (state.matchHistory ?? []).filter(
           (entry) => !dbIds.has(entry.id)
         );
-        // Merge DB entries with whatever is already in local state.
         dispatch({ type: "MERGE_HISTORY", payload: dbEntries });
         dbHydratedRef.current = true;
         // Force-push any local-only matches to the server right now, ONE BY ONE.
-        // (Batching would hit Vercel's 4.5MB body limit — see sync effect below.)
         if (localOnly.length > 0) {
           console.log(`[db] force-syncing ${localOnly.length} local-only match(es) to DB`);
-          let fok = 0;
-          let ffail = 0;
           for (const entry of localOnly) {
             if (!entry?.id) continue;
             try {
@@ -1421,17 +1397,11 @@ function App() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ entry }),
               });
-              if (r.ok) fok += 1;
-              else {
-                ffail += 1;
-                console.error(`[db] force-sync upsert failed for ${entry.id}: HTTP ${r.status}`);
-              }
+              if (!r.ok) console.error(`[db] force-sync upsert failed for ${entry.id}: HTTP ${r.status}`);
             } catch (e) {
-              ffail += 1;
               console.error(`[db] force-sync error for ${entry.id}:`, e);
             }
           }
-          console.log(`[db] force-sync done — ok: ${fok}, failed: ${ffail}`);
         }
       } catch (err) {
         console.error("DB hydration failed", err);
@@ -1445,12 +1415,9 @@ function App() {
   }, []);
 
   // ---- Database sync: debounce-push matchHistory changes to the server ----
-  // IMPORTANT: We upsert matches ONE BY ONE to /api/matches instead of batching
-  // all of them in a single /api/sync call. Each match's full data payload
-  // (maps + rounds + players) is 100-500KB, and Vercel serverless functions
-  // reject request bodies larger than 4.5MB with HTTP 413. Sending 3-10
-  // matches at once blows past that limit, so sync would silently fail and
-  // matches would never reach the DB. Individual POSTs stay well under the cap.
+  // We upsert matches ONE BY ONE to /api/matches. Each match's full data
+  // payload is 100-500KB, and Vercel serverless rejects request bodies larger
+  // than 4.5MB with HTTP 413. Individual POSTs stay well under the cap.
   useEffect(() => {
     if (!dbHydratedRef.current) return;
     window.clearTimeout(dbSyncTimerRef.current);
@@ -1468,9 +1435,8 @@ function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ entry }),
           });
-          if (res.ok) {
-            ok += 1;
-          } else {
+          if (res.ok) ok += 1;
+          else {
             fail += 1;
             console.error(`[db] upsert failed for ${entry.id}: HTTP ${res.status}`);
           }

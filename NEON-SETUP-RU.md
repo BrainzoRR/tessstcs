@@ -1,7 +1,7 @@
 # Подключение Neon Postgres к Vercel — ПОШАГОВО (для новичков)
 
 ## Проблема
-Сейчас при обновлении сайта на Vercel вся история матчей сбрасывается.
+При обновлении сайта на Vercel вся история матчей сбрасывается.
 **Причина:** Vercel использует SQLite-файл, который стирается при каждом деплое.
 **Решение:** Подключить облачную базу Neon Postgres (бесплатно, навсегда).
 
@@ -18,7 +18,7 @@
    - **Region**: выбери ближайший (например Frankfurt для Европы)
 5. Нажми **Create project**
 
-После создания Neon покажет страницу с connection string. **НЕ ЗАКРЫВАЙ ЕЁ** — пригодится.
+После создания Neon покажет страницу с connection string. **НЕ ЗАКРЫВАЙ ЕЁ**.
 
 ---
 
@@ -53,12 +53,7 @@ postgresql://username:password@ep-xxxxx.eu-central-1.aws.neon.tech/neondb?sslmod
 
 ## ШАГ 4: Создай таблицы в базе (один раз!)
 
-Ты добавил ключ, но таблиц ещё нет в базе. Нужно их создать ОДИН раз.
-
-### Вариант A — через Neon консоль (проще всего):
-
-1. В Neon проекте открой вкладку **SQL Editor** (слева в меню)
-2. Скопируй ВЕСЬ текст ниже и вставь в редактор:
+В Neon проекте открой вкладку **SQL Editor** (слева в меню), скопируй ВЕСЬ текст ниже и вставь в редактор:
 
 ```sql
 CREATE TABLE IF NOT EXISTS "MatchRecord" (
@@ -93,19 +88,7 @@ CREATE INDEX IF NOT EXISTS "MatchRecord_teamBName_idx" ON "MatchRecord"("teamBNa
 CREATE INDEX IF NOT EXISTS "MatchRecord_includedInStats_idx" ON "MatchRecord"("includedInStats");
 ```
 
-3. Нажми **Run** (кнопка сверху)
-4. Должно появиться "Query executed successfully"
-
-### Вариант B — через Vercel CLI (если установлен):
-
-```bash
-# В папке проекта
-npm i -g vercel
-vercel login
-vercel link          # выбери свой проект
-vercel env pull .env.local   # скачает DATABASE_URL с Vercel
-npx prisma db push           # создаст таблицы
-```
+Нажми **Run**. Должно появиться "Query executed successfully".
 
 ---
 
@@ -115,46 +98,20 @@ npx prisma db push           # создаст таблицы
 2. Вкладка **Deployments**
 3. Найди последний деплой → нажми **⋮** (три точки) → **Redeploy**
 4. Дождись сборки (~2 минуты)
-5. Открой сайт — теперь данные сохраняются навсегда! 🎉
+5. Открой `https://твой-домен.vercel.app/api/debug` — должен показать `dbProvider: "postgresql"` и `totalMatches: 0`
+6. Симилируй матч на сайте → проверь `/api/debug` снова → `totalMatches` должен вырасти
+
+Готово! Данные сохраняются навсегда. 🎉
 
 ---
 
-## ШАГ 6: Проверь что работает
+## Если что-то не работает
 
-1. Открой свой сайт на Vercel
-2. Сымитируй матч → сохрани в архив
-3. Обнови страницу (F5) — матч должен остаться
-4. Передеплой ещё раз — матч тоже должен остаться
+### `PrismaClientInitializationError`
+→ `DATABASE_URL` не задан в Vercel или неверный. Проверь Settings → Environment Variables.
 
-Если данные сохраняются между деплоями — **всё готово!** ✅
-
----
-
-## 🛠 Если что-то не работает
-
-### Ошибка: `PrismaClientInitializationError`
-→ `DATABASE_URL` не задан в Vercel или неверный. Проверь:
-- Settings → Environment Variables → есть ли `DATABASE_URL`?
-- Значение начинается с `postgresql://` (не `file:`)?
-
-### Ошибка: `The table MatchRecord does not exist`
+### `The table MatchRecord does not exist`
 → Ты не выполнил Шаг 4 (создание таблиц). Иди в Neon SQL Editor и выполни SQL.
 
-### Данные всё равно пропадают
-→ Проверь что в Environment Variables Vercel значение НЕ `file:...` (это старое). Должно быть `postgresql://...` из Neon.
-
-### Как проверить что Vercel видит базу
-→ Vercel → твой проект → вкладка **Logs** → открой любой запрос `/api/matches` → если в логах Prisma-запросы без ошибок — всё ок.
-
----
-
-## 📞 Короткий чек-лист
-
-- [ ] Создал проект на neon.tech
-- [ ] Скопировал `postgresql://...` connection string
-- [ ] Добавил в Vercel → Settings → Environment Variables → `DATABASE_URL`
-- [ ] Выполнил SQL в Neon SQL Editor (создал таблицу MatchRecord)
-- [ ] Сделал Redeploy на Vercel
-- [ ] Проверил: создал матч → обновил → матч остался ✅
-
-**Всё!** Теперь история и статистика сохраняются навсегда в облаке Neon, и не пропадут при обновлениях сайта.
+### Данные пропадают
+→ Проверь `/api/debug`. Если `dbProvider: "file"` — DATABASE_URL ещё SQLite, поменяй на Neon.
