@@ -242,3 +242,45 @@ Stage Summary:
 - В Console видно "[db] sync: upserting N match(es)" и размер каждого payload.
 - Архив: deploy-export/cs2-vercel-deploy.zip (633KB).
 - Пользователю: скачать, заменить на GitHub, redeploy. BO5 теперь сохранятся.
+
+---
+Task ID: add-cache-map
+Agent: Z.ai Code (main)
+Task: Пользователь: добавить Cache в маппул вместо Overpass (но Overpass оставить доступным), реалистичные позиции смертей/тайминги/роли/стороны для Cache. Радар скинул (De_cache_radar_cs2.webp).
+
+Work Log:
+- Скопировал радар: upload/De_cache_radar_cs2.webp → public/radars/cache.webp (32KB).
+- Использовал VLM для анализа расположения зон на радаре: A site top-left, B site bottom-right, Mid center.
+- simulation.js изменения:
+  - MAP_POOL: заменил "Overpass" на "Cache" (Overpass оставил в RESERVE_MAPS для возврата).
+  - MAP_CONFIGS.Cache: baseT 0.52/baseCT 0.48 (T-sided), awpWeight 1.1 (long A main + mid angles), entryWeight 1.06 (fast A/squeaky), lurkWeight 1.08 (vents/z-connector), traits: mid control/long A main/vents lurk/fast B halls.
+  - MAP_ZONES.Cache: A (A main, squeaky, highway, quad, site), B (B halls, checkers, toxic, site), Mid (mid, vents, z-connector, highway).
+  - MAP_ROUTE_PRESETS.Cache: entry/hold/support/retake/postPlant/lurk для A/B/Mid.
+  - ZONE_TIME_WINDOWS.Cache: реалистичные тайминги (A main [14,58], squeaky [20,64], mid [12,44], vents [24,78], B halls [26,72], etc.).
+  - TIGHT_ZONE_TOKENS: добавил squeaky, quad, toxic, checkers, vents, highway, z-connector.
+  - LARGE_ZONE_TOKENS: добавил A main, B halls.
+  - preferredMaps в seed-командах: заменил Overpass на Cache (4 команды).
+- App.jsx изменения:
+  - RADAR_ASSETS.Cache: { upper: "/radars/cache.webp" }.
+  - RADAR_VIEWBOXES.Cache: { upper: { left: 0.04, top: 0.04, width: 0.92, height: 0.92 } }.
+  - RADAR_SITE_FALLBACKS.Cache: A (0.28,0.30), B (0.70,0.72), Mid (0.48,0.50).
+  - RADAR_ZONE_POSITIONS.Cache: детальные позиции всех зон (A main, squeaky, highway, quad, B halls, checkers, toxic, mid, vents, z-connector, forklift, sandbags) с реалистичными координатами.
+  - RADAR_ZONE_ALIASES.Cache: lowercase → display name маппинг.
+- Build проходит. Lint чистый.
+- Пересоздал архив (666KB) с Cache + радаром.
+
+Cache характеристики (реалистичные для de_cache CS2):
+- T-sided (52/48): mid control даёт T заходы на A main/squeaky/B halls, CT ротации длинные через vents/highway.
+- AWP map: long A main + mid angles (awpWeight 1.1).
+- Entry fraggers thrive: fast A/squeaky hits (entryWeight 1.06).
+- Lurkers: vents/z-connector (lurkWeight 1.08).
+- Utility: smokes for highway/quad, mollies for toxic/sandbags (utilityWeight 1.06).
+- Лучшие роли: AWPer (mid/A main duels), Entry Fragger (A executes), Lurker (vents).
+- Лучшая сторона: T (mid control решает).
+
+Stage Summary:
+- Cache добавлен в маппул вместо Overpass (Overpass в RESERVE_MAPS, можно вернуть).
+- Реалистичные позиции смертей на радаре (14 зон с координатами).
+- Реалистичные тайминги (A main early, squeaky doorbang, B halls late execute, vents lurk).
+- Роли/стороны: T-sided, AWP/Entry/Lurker сильнее.
+- Архив: deploy-export/cs2-vercel-deploy.zip (666KB) с cache.webp.
