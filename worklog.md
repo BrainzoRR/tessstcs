@@ -176,3 +176,27 @@ Stage Summary:
 - Дубликаты при reload исправлены: currentMatch не восстанавливается.
 - Архив обновлён: deploy-export/cs2-vercel-deploy.zip.
 - Пользователю: скачать новый zip, заменить на GitHub, redeploy.
+
+---
+Task ID: fix-sqlite-postgresql-mismatch
+Agent: Z.ai Code (main)
+Task: Пользователь: 500 error "the URL must start with the protocol file:" — schema=sqlite но DATABASE_URL=postgresql. Матчи из Neon не грузят, только локальные.
+
+Work Log:
+- Нашёл причину: schema.prisma имел provider="sqlite" (моё редактирование на postgresql откатилось, видимо bun install/db:push вернул sqlite). На Vercel DATABASE_URL=postgresql (Neon) → конфликт → все API запросы падают с 500 → /api/matches не отвечает → hydration не грузит матчи из Neon → видны только локальные (localStorage).
+- ИСПРАВИЛ: provider = "postgresql" в schema.prisma + комментарий объясняющий почему.
+- Восстановил ClientApp.tsx (пропал) — критичен для Vercel build (без него Turbopack ругается на dynamic ssr:false в "use client" page).
+- Проверил build: DATABASE_URL=postgresql://placeholder bun run build — прошёл успешно, все роуты корректны.
+- Пересоздал чистый архив (631KB) без мусора (deploy-export не попадает внутрь).
+- Проверил ВСЕ 11 пунктов в zip: schema postgresql ✓, uniqueId ✓, MERGE_HISTORY ✓, currentMatch null ✓, one-by-one ✓, teamAPlayers strip ✓, api/route.ts absent ✓, ClientApp.tsx ✓, debug endpoint ✓, NEON-SETUP-RU.md ✓, 8 радаров ✓.
+
+Про 300+ матчей:
+- С teamAPlayers strip каждый матч = 20-40KB (было 2.5MB).
+- Neon free = 0.5GB → 300 матчей × 40KB = 12MB (далеко от лимита).
+- One-by-one sync: каждый запрос 20-40KB, лимит Vercel 4.5MB — запас 100x.
+- 300+ матчей абсолютно реально.
+
+Stage Summary:
+- 500 error исправлен: schema = postgresql (совпадает с Neon DATABASE_URL).
+- Архив: deploy-export/cs2-vercel-deploy.zip (631KB) со всеми 11 фиксами.
+- Пользователю: скачать zip, ПОЛНОСТЬЮ заменить файлы на GitHub (удалить старую prisma/schema.prisma с sqlite!), redeploy.

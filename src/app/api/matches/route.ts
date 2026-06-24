@@ -27,12 +27,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No id" }, { status: 400 });
     }
     const row = entryToRow(entry);
+    const dataJsonSize = row.dataJson.length;
+    console.log(`[api/matches POST] id=${row.id} | dataJson=${dataJsonSize} bytes (${(dataJsonSize/1024).toFixed(1)} KB) | maps=${row.mapsLabel}`);
+    if (dataJsonSize > 4_000_000) {
+      console.error(`[api/matches POST] dataJson too large (${dataJsonSize} bytes) — would exceed Vercel 4.5MB limit`);
+    }
     const saved = await db.matchRecord.upsert({
       where: { id: row.id },
       create: row,
       update: row,
     });
-    return NextResponse.json({ ok: true, id: saved.id });
+    return NextResponse.json({ ok: true, id: saved.id, size: dataJsonSize });
   } catch (err) {
     console.error("[api/matches POST]", err);
     return NextResponse.json({ error: "Save failed" }, { status: 500 });
