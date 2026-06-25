@@ -334,7 +334,7 @@ const RADAR_VIEWBOXES = {
     upper: { left: 0.16, top: 0.05, width: 0.74, height: 0.91 },
   },
   Cache: {
-    upper: { left: 0.04, top: 0.04, width: 0.92, height: 0.92 },
+    upper: { left: 0, top: 0, width: 1, height: 1 },
   },
 };
 
@@ -399,11 +399,11 @@ const RADAR_SITE_FALLBACKS = {
     B: radarAnchors([[0.84, 0.19], [0.81, 0.19], [0.73, 0.3]]),
     Mid: radarAnchors([[0.46, 0.74], [0.51, 0.53], [0.57, 0.64]]),
   },
-  // Cache layout (de_cache CS2): A site = RIGHT, B site = BOTTOM-CENTER, Mid = CENTER.
+  // Cache layout (de_cache CS2): A site = center-left, B site = center, Mid = center.
   Cache: {
-    A: radarAnchors([[0.60, 0.33], [0.58, 0.31], [0.62, 0.35]]),
-    B: radarAnchors([[0.40, 0.80], [0.38, 0.78], [0.42, 0.82]]),
-    Mid: radarAnchors([[0.46, 0.44], [0.44, 0.42], [0.48, 0.46]]),
+    A: radarAnchors([[0.31, 0.44], [0.29, 0.42], [0.33, 0.46]]),
+    B: radarAnchors([[0.50, 0.52], [0.48, 0.50], [0.52, 0.54]]),
+    Mid: radarAnchors([[0.47, 0.35], [0.45, 0.37], [0.49, 0.33]]),
   },
 };
 
@@ -505,30 +505,31 @@ const RADAR_ZONE_POSITIONS = {
     water: radarAnchors([[0.57, 0.64], [0.54, 0.67]]),
     "top mid": radarAnchors([[0.46, 0.74], [0.43, 0.71]]),
   },
-  // Cache zone positions — coordinates taken from a real labeled Cache radar
-  // image (ПОЗИЦИИКЭШ.jpg) and cross-checked against the radar webp.
-  // Geography: CT spawn = top-left, T spawn = bottom-right, A site = right
-  // side, B site = bottom-center-left, Mid = center.
+  // Cache zone positions — coordinates taken directly from a labeled Cache
+  // radar (ПОЗИЦИИКЭШ.jpg): A SITE ~0.31, B SITE ~0.50, T SPAWN ~0.91 (right),
+  // CT SPAWN ~0.07 (left). A main / B halls are approach lanes FROM T spawn
+  // towards the sites — placed between T spawn and the bombsites so death
+  // markers for T attackers land on the approach, not on T spawn itself.
   Cache: {
-    // A site (CT defense) — right side, around Long A / Default / Truck
-    "site::A": radarAnchors([[0.60, 0.33], [0.58, 0.31], [0.62, 0.35]]),
-    quad: radarAnchors([[0.56, 0.35], [0.54, 0.33]]),
-    "forklift": radarAnchors([[0.64, 0.38], [0.62, 0.40]]),
-    "sandbags": radarAnchors([[0.58, 0.38], [0.60, 0.36]]),
-    highway: radarAnchors([[0.57, 0.45], [0.55, 0.47]]),
-    // A approaches (T attack) — from T spawn (bottom-right) towards A
-    "A main": radarAnchors([[0.76, 0.44], [0.74, 0.46], [0.78, 0.42]]),
-    squeaky: radarAnchors([[0.71, 0.53], [0.69, 0.55]]),
-    // B site (CT defense) — bottom-center-left, around Toxic / Default / Troyka
-    "site::B": radarAnchors([[0.40, 0.80], [0.38, 0.78], [0.42, 0.82]]),
-    toxic: radarAnchors([[0.51, 0.80], [0.49, 0.82]]),
-    checkers: radarAnchors([[0.45, 0.74], [0.43, 0.76]]),
-    // B approaches (T attack) — from T spawn towards B (B main / B corridor)
-    "B halls": radarAnchors([[0.52, 0.74], [0.50, 0.72], [0.54, 0.76]]),
-    "z-connector": radarAnchors([[0.47, 0.62], [0.45, 0.64]]),
-    // Mid (center) — Construction / Boost / Main mid
-    mid: radarAnchors([[0.46, 0.44], [0.44, 0.42], [0.48, 0.46]]),
-    vents: radarAnchors([[0.41, 0.61], [0.39, 0.63]]),
+    // A site (CT defense) — center-left, the bombsite itself
+    "site::A": radarAnchors([[0.31, 0.44], [0.29, 0.42], [0.33, 0.46]]),
+    quad: radarAnchors([[0.35, 0.40], [0.33, 0.38]]),
+    "forklift": radarAnchors([[0.28, 0.48], [0.30, 0.50]]),
+    "sandbags": radarAnchors([[0.33, 0.48], [0.31, 0.50]]),
+    highway: radarAnchors([[0.38, 0.40], [0.40, 0.38]]),
+    // A approaches (T attack) — Long A lane from mid towards A
+    "A main": radarAnchors([[0.56, 0.33], [0.54, 0.35], [0.58, 0.31]]),
+    squeaky: radarAnchors([[0.47, 0.35], [0.45, 0.37]]),
+    // B site (CT defense) — center, the bombsite
+    "site::B": radarAnchors([[0.50, 0.52], [0.48, 0.50], [0.52, 0.54]]),
+    toxic: radarAnchors([[0.45, 0.56], [0.47, 0.54]]),
+    checkers: radarAnchors([[0.53, 0.56], [0.51, 0.58]]),
+    // B approaches (T attack) — B main / B corridor from T spawn towards B
+    "B halls": radarAnchors([[0.40, 0.69], [0.38, 0.71], [0.42, 0.67]]),
+    "z-connector": radarAnchors([[0.52, 0.75], [0.50, 0.73]]),
+    // Mid (center) — main mid / construction
+    mid: radarAnchors([[0.47, 0.35], [0.45, 0.37], [0.49, 0.33]]),
+    vents: radarAnchors([[0.42, 0.61], [0.40, 0.63]]),
   },
 };
 
