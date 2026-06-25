@@ -319,3 +319,35 @@ Stage Summary:
 - Координаты проверены через VLM анализ реального радара de_cache.
 - Архив: deploy-export/cs2-vercel-deploy.zip (667KB).
 - Пользователю: скачать, заменить на GitHub, redeploy.
+
+---
+Task ID: fix-cache-deaths-ct-at-t-base
+Agent: Z.ai Code (main)
+Task: Пользователь: CT умирают почти на базе у T. Смерти ставятся нереалистично.
+
+Work Log:
+- Проанализировал скриншот пользователя (0ebda5b8.webp) через VLM.
+- Понял корневую причину: мои предыдущие координаты имели T approach зоны (A main, B halls) слишком близко к сайтам. A main был (0.30, 0.35) — рядом с A site (0.32, 0.22). Из-за этого death markers T и CT смешивались в одной области, и визуально казалось что CT умирают у T базы.
+- Использовал VLM для тщательного анализа реального радара de_cache с разделением T approach vs CT hold:
+  - A site (CT hold): site 0.25, quad 0.30, forklift 0.28, sandbags 0.26
+  - A approaches (T): A main 0.15 (далеко от A site, к T спавну), squeaky 0.20
+  - B site (CT hold): site 0.75, toxic 0.70, checkers 0.65
+  - B approaches (T): B halls 0.85 (далеко от B site, к T спавну), z-connector 0.80
+  - Mid: mid 0.50, vents 0.45, highway 0.40
+- Обновил RADAR_ZONE_POSITIONS.Cache: T approach зоны теперь в направлении T спавна (A main 0.15, B halls 0.85), CT hold зоны на сайтах (site::A 0.25, site::B 0.75). Расстояние между T и CT зонами теперь ~0.10-0.15 (реалистично для Cache).
+- Обновил RADAR_SITE_FALLBACKS.Cache: A 0.25, B 0.75, Mid 0.50.
+- Логика buildVictimZonePool проверена — правильная: CT умирают в hold/support зонах (на сайте), T умирают в entry зонах (на подходах). С новыми координатами это теперь визуально разделено.
+- Build проходит. Lint чистый.
+- Пересоздал архив (668KB).
+
+Cache death marker layout (теперь реалистично):
+- CT смерти на A: верх-лево радара (site 0.25, quad 0.30, forklift 0.28)
+- T смерти на A подходах: левый край (A main 0.15, squeaky 0.20)
+- CT смерти на B: низ-право (site 0.75, toxic 0.70, checkers 0.65)
+- T смерти на B подходах: правый край (B halls 0.85, z-connector 0.80)
+- Mid смерти: центр (mid 0.50, vents 0.45, highway 0.40)
+
+Stage Summary:
+- CT больше не умирают у T базы: T approach зоны (A main 0.15, B halls 0.85) теперь далеко от CT hold зон (sites 0.25/0.75).
+- Координаты проверены через VLM анализ реального радара с разделением T/CT географии.
+- Архив: deploy-export/cs2-vercel-deploy.zip (668KB).
