@@ -2742,16 +2742,20 @@ function buildHighlightCards(results) {
       }
     });
 
-    const topMapPlayer = [...map.teamAPlayers, ...map.teamBPlayers].sort(
-      (left, right) => right.stats.rating - left.stats.rating
-    )[0];
+    const mapPlayers = [
+      ...(Array.isArray(map.teamAPlayers) ? map.teamAPlayers : []),
+      ...(Array.isArray(map.teamBPlayers) ? map.teamBPlayers : []),
+    ];
+    const topMapPlayer = mapPlayers
+      .filter((p) => p?.stats?.rating != null)
+      .sort((left, right) => (right.stats?.rating ?? 0) - (left.stats?.rating ?? 0))[0];
     if (topMapPlayer) {
       cards.push({
         id: `${map.id}_map_star_${topMapPlayer.id}`,
         weight: 5,
         eyebrow: map.mapName,
         title: `${topMapPlayer.nickname} owned ${map.mapName}`,
-        detail: `${topMapPlayer.stats.kills} kills · ${topMapPlayer.stats.rating} rating`,
+        detail: `${topMapPlayer.stats?.kills ?? 0} kills · ${topMapPlayer.stats?.rating ?? 0} rating`,
       });
     }
   });
@@ -6756,7 +6760,10 @@ function PlayerFormBoard({ map }) {
   const formLookup = useMemo(() => buildPlayerFormLookup(map.rounds), [map.rounds]);
   const rows = useMemo(
     () =>
-      [...map.teamAPlayers, ...map.teamBPlayers]
+      [
+        ...(Array.isArray(map.teamAPlayers) ? map.teamAPlayers : []),
+        ...(Array.isArray(map.teamBPlayers) ? map.teamBPlayers : []),
+      ]
         .map((player) => ({
           id: player.id,
           nickname: player.nickname,
