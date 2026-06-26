@@ -2568,15 +2568,22 @@ function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, c
   );
 
   // Format-specific balance:
-  // - BO1: high randomness — one bad map and you're out, anyone can win.
-  // - BO3: balanced (the default feel).
+  // - BO1: HEAVY randomness — one map, anything can happen. T2 teams beat T1
+  //   teams regularly in real BO1s (e.g. Major upsets). Win prob is pushed
+  //   towards 50/50 with big form swings so upsets are common, not rare.
+  // - BO3: balanced (the default feel). Strong team is favored but T2 can steal a map.
   // - BO5: less randomness, prep & captain/coach matter more. Strong teams
   //   with deeper map pools and better coaching pull ahead over 5 maps.
   const formatSettings = {
-    BO1: { formVariance: 0.38, upsetChance: 0.14, upsetBoost: 0.26, clampMin: 0.18, clampMax: 0.82, tacticalWeight: 0.15 },
-    BO3: { formVariance: 0.28, upsetChance: 0.09, upsetBoost: 0.20, clampMin: 0.22, clampMax: 0.78, tacticalWeight: 0.17 },
-    BO5: { formVariance: 0.18, upsetChance: 0.05, upsetBoost: 0.14, clampMin: 0.26, clampMax: 0.74, tacticalWeight: 0.22 },
-  }[matchFormat] || { formVariance: 0.28, upsetChance: 0.09, upsetBoost: 0.20, clampMin: 0.22, clampMax: 0.78, tacticalWeight: 0.17 };
+    // BO1: near coin-flip. clamp 0.30-0.70 means even a much weaker team has
+    // 30% per round; with formVariance 0.55 and 22% upset chance, T2 wins
+    // the map ~35-40% of the time against T1 — realistic for BO1 upsets.
+    BO1: { formVariance: 0.55, upsetChance: 0.22, upsetBoost: 0.30, clampMin: 0.30, clampMax: 0.70, tacticalWeight: 0.10, compression: 0.45 },
+    // BO3: T1 favored but T2 takes maps. More form swing than BO5, less than BO1.
+    BO3: { formVariance: 0.38, upsetChance: 0.14, upsetBoost: 0.24, clampMin: 0.24, clampMax: 0.76, tacticalWeight: 0.17, compression: 0.30 },
+    // BO5: prep & depth win out. Low randomness, tactical weight high.
+    BO5: { formVariance: 0.24, upsetChance: 0.08, upsetBoost: 0.16, clampMin: 0.26, clampMax: 0.74, tacticalWeight: 0.22, compression: 0.20 },
+  }[matchFormat] || { formVariance: 0.38, upsetChance: 0.14, upsetBoost: 0.24, clampMin: 0.24, clampMax: 0.76, tacticalWeight: 0.17, compression: 0.30 };
 
   // Per-round form variance: ±half of formVariance around 1.0.
   // BO1 swings wildly (a T2 team can pop off for a whole map),
@@ -2603,6 +2610,14 @@ function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, c
     mapConfig.baseCT;
 
   let prob = tScore / Math.max(0.01, tScore + ctScore);
+
+  // Compression: pull the raw probability towards 0.5 (coin-flip). In BO1
+  // this is strong (0.45) so a T1 team that would otherwise have 0.68 per
+  // round ends up around 0.59 — still favored but T2 has a real chance to
+  // take the map. BO5 compresses less (0.20) so the better team's edge
+  // holds over 5 maps. This is the main lever that makes upsets happen.
+  const compression = formatSettings.compression ?? 0.3;
+  prob = 0.5 + (prob - 0.5) * (1 - compression);
 
   // Upset chance: the underdog gets a form spike. Higher in BO1 (one map,
   // anything goes), lower in BO5 (prep + depth usually wins out).

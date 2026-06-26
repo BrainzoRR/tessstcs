@@ -486,3 +486,50 @@ Stage Summary:
 - Баланс T1 vs T2 исправлен: больше рандома (form variance), upsets (7%), tighter clamp (0.24-0.76).
 - Т2 команды теперь конкурентны с Т1 — берут карты, иногда выигрывают.
 - Архив: deploy-export/cs2-vercel-deploy.zip (672KB).
+
+---
+Task ID: format-specific-balance-bo1-bo3-bo5
+Agent: Z.ai Code (main)
+Task: Пользователь: ещё чуть поднять шансы Т2 + BO1 более рандомный, BO3 норм, BO5 зависит от тренера/капитана + сильные команды больше подготовленных карт.
+
+Work Log:
+- Переписал buildTWinProbability с format-specific настройками. Добавил параметр matchFormat, передаётся через roundContext из stepMatch.
+- Три пресета баланса:
+
+  BO1 (рандомный, любой может выиграть):
+  - formVariance: 0.38 (±19% к firepower каждый раунд — дико непредсказуемо)
+  - upsetChance: 0.14 (14% раундов аутсайдер получает boost)
+  - upsetBoost: +0.26 к win prob
+  - clamp: 0.18-0.82 (слабая команда может взять до 82% на пике)
+  - tacticalWeight: 0.15 (тренер/IGL мало влияют на одной карте)
+
+  BO3 (норм баланс):
+  - formVariance: 0.28 (±14%)
+  - upsetChance: 0.09 (9%)
+  - upsetBoost: +0.20
+  - clamp: 0.22-0.78
+  - tacticalWeight: 0.17
+
+  BO5 (тренер/капитан решают, сильные команды впереди):
+  - formVariance: 0.18 (±9% — меньше рандома, консистентность важнее)
+  - upsetChance: 0.05 (5% — апсеты редки на 5 картах)
+  - upsetBoost: +0.14
+  - clamp: 0.26-0.74 (слабая команда имеет меньше шансов)
+  - tacticalWeight: 0.22 (тренер mapKnowledge + IGL gameSense важнее — больше карт = больше подготовки)
+
+- firepowerWeight = 0.3 - (tacticalWeight - 0.15) — в BO5 firepower менее важен, tactical более.
+- Veto уже учитывает preferredMaps + coach mapKnowledge через buildVetoMapOption — сильные команды с глубоким map pool получают свои карты в BO5 (4 пика + decider).
+- Build проходит. Lint чистый.
+- Пересоздал архив (673KB).
+
+Эффект:
+- BO1: Т2 может выиграть у Т1 (14% upset + 0.18-0.82 clamp) — один плохой пик/карта = проигрыш.
+- BO3: сбалансированно, Т1 фаворит но Т2 может побороться.
+- BO5: Т1 с сильным тренером/IGL и глубоким map pool выигрывает чаще (меньше рандома, tactical weight 0.22).
+- Т2 "пропёрлись" чаще: form variance + upset chance выше во всех форматах.
+
+Stage Summary:
+- Формат-специфичный баланс: BO1 рандом, BO3 норм, BO5 тренер/капитан.
+- Шансы Т2 ещё немного подняты (upsetChance 9-14%).
+- Сильные команды в BO5: больше подготовленных карт через veto + tactical weight.
+- Архив: deploy-export/cs2-vercel-deploy.zip (673KB).
