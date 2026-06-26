@@ -436,3 +436,23 @@ Stage Summary:
 - ViewBox Cache исправлен: теперь (0,0,1,1) вместо (0.04,0.04,0.92,0.92). Координаты точек 1-в-1 с радаром.
 - A main (0.47, 0.35) теперь отображается в центре-верху, не в углу.
 - Архив: deploy-export/cs2-vercel-deploy.zip (670KB).
+
+---
+Task ID: fix-results-crash-on-stripped-matches
+Agent: Z.ai Code (main)
+Task: Пользователь: при открытии матча из истории вылезает "Live session crashed" render error.
+
+Work Log:
+- Проанализировал скриншот ошибки (b21989f0.webp) через VLM: "Live session crashed — The simulator hit a render error."
+- Нашёл причину: мой strip в db-sync.ts удаляет teamAPlayers/teamBPlayers из maps для уменьшения payload. Но UI функции buildHighlightCards (строка 2745) и PlayerFormBoard (строка 6763) обращались к map.teamAPlayers напрямую через spread `[...map.teamAPlayers, ...map.teamBPlayers]` — когда массивов нет (stripped), spread падал с "Cannot read properties of undefined".
+- ФИКС: сделал безопасный доступ в обоих местах:
+  - buildHighlightCards: `const mapPlayers = [...(Array.isArray(map.teamAPlayers) ? map.teamAPlayers : []), ...(Array.isArray(map.teamBPlayers) ? map.teamBPlayers : [])]` + filter по p?.stats?.rating != null + optional chaining для stats.kills/rating.
+  - PlayerFormBoard: такая же защита через Array.isArray.
+- Проверил другие использования удалённых полей (startLoadouts, preRoundExpectancy, playerRoundStats) — все используют ?. и ?? [] fallback, безопасны.
+- Build проходит. Lint чистый.
+- Пересоздал архив (670KB).
+
+Stage Summary:
+- Crash при открытии матча из истории исправлен: teamAPlayers/teamBPlayers доступ безопасно через Array.isArray.
+- Matches из БД (со stripped teamAPlayers) теперь открываются без ошибки — show map star/highlight cards просто пропускаются если данных нет.
+- Архив: deploy-export/cs2-vercel-deploy.zip (670KB).

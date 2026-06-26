@@ -2501,6 +2501,14 @@ function teamMapAdvantage(team, mapName) {
   return clamp(getMapPriority(team, mapName) * getMapModifier(team, mapName), 0.12, 1.25);
 }
 
+/** Quick strength estimate from a team's live state (used for upset logic). */
+function teamStrengthValue(teamState) {
+  if (!teamState?.players?.length) return 0;
+  return average(
+    teamState.players.map((player) => compositeRating(player))
+  );
+}
+
 function teamFirepower(teamState) {
   return average(
     teamState.players.map((player) => {
@@ -2559,22 +2567,48 @@ function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, c
     tLoadoutValue
   );
 
+  // Per-round form variance: each team's performance swings ±15% round to
+  // round. This represents momentum, individual pop-off games, bad days, etc.
+  // Without it, the stronger team wins almost every round and BO5s end 13-2,
+  // 13-4 — unrealistic for T2 vs T1 where upsets and close maps happen often.
+  const tFormRoll = 0.85 + Math.random() * 0.3;
+  const ctFormRoll = 0.85 + Math.random() * 0.3;
+
   const tScore =
-    (tProfile.firepower * 0.3 +
+    (tProfile.firepower * tFormRoll * 0.3 +
       tProfile.mapAdvantage * 0.2 +
       tProfile.econAdvantage * 0.25 +
       tProfile.tacticalAdvantage * 0.15 +
       tProfile.momentum * 0.1) *
     mapConfig.baseT;
   const ctScore =
-    (ctProfile.firepower * 0.3 +
+    (ctProfile.firepower * ctFormRoll * 0.3 +
       ctProfile.mapAdvantage * 0.2 +
       ctProfile.econAdvantage * 0.25 +
       ctProfile.tacticalAdvantage * 0.15 +
       ctProfile.momentum * 0.1) *
     mapConfig.baseCT;
 
-  return clamp(tScore / Math.max(0.01, tScore + ctScore), 0.14, 0.86);
+  let prob = tScore / Math.max(0.01, tScore + ctScore);
+
+  // Upset chance: ~7% of rounds the underdog gets a big form spike (plays
+  // out of their mind). This lets T2 teams steal rounds/maps from T1 teams
+  // the way real CS2 upsets work.
+  const tStrength = teamStrengthValue(tTeamState);
+  const ctStrength = teamStrengthValue(ctTeamState);
+  const underdogIsT = tStrength < ctStrength;
+  if (Math.random() < 0.07) {
+    if (underdogIsT) {
+      prob = Math.min(0.72, prob + 0.18);
+    } else {
+      prob = Math.max(0.28, prob - 0.18);
+    }
+  }
+
+  // Tighter clamp so even a much weaker team has a fighting chance each round
+  // (was 0.14-0.86, now 0.24-0.76). Over a 24-round map this produces far
+  // more competitive scorelines like 13-8, 11-13 instead of 13-2, 13-4.
+  return clamp(prob, 0.24, 0.76);
 }
 
 function chooseStrategy(mapName, tTeamState) {
