@@ -2550,7 +2550,7 @@ function getTeamRoundProfile(teamState, opponentState, mapName, teamLoadoutValue
   };
 }
 
-function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, ctLoadoutValue) {
+function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, ctLoadoutValue, matchFormat) {
   const mapConfig = MAP_CONFIGS[mapName];
   const tProfile = getTeamRoundProfile(
     tTeamState,
@@ -2567,48 +2567,57 @@ function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, c
     tLoadoutValue
   );
 
-  // Per-round form variance: each team's performance swings ±15% round to
-  // round. This represents momentum, individual pop-off games, bad days, etc.
-  // Without it, the stronger team wins almost every round and BO5s end 13-2,
-  // 13-4 — unrealistic for T2 vs T1 where upsets and close maps happen often.
-  const tFormRoll = 0.85 + Math.random() * 0.3;
-  const ctFormRoll = 0.85 + Math.random() * 0.3;
+  // Format-specific balance:
+  // - BO1: high randomness — one bad map and you're out, anyone can win.
+  // - BO3: balanced (the default feel).
+  // - BO5: less randomness, prep & captain/coach matter more. Strong teams
+  //   with deeper map pools and better coaching pull ahead over 5 maps.
+  const formatSettings = {
+    BO1: { formVariance: 0.38, upsetChance: 0.14, upsetBoost: 0.26, clampMin: 0.18, clampMax: 0.82, tacticalWeight: 0.15 },
+    BO3: { formVariance: 0.28, upsetChance: 0.09, upsetBoost: 0.20, clampMin: 0.22, clampMax: 0.78, tacticalWeight: 0.17 },
+    BO5: { formVariance: 0.18, upsetChance: 0.05, upsetBoost: 0.14, clampMin: 0.26, clampMax: 0.74, tacticalWeight: 0.22 },
+  }[matchFormat] || { formVariance: 0.28, upsetChance: 0.09, upsetBoost: 0.20, clampMin: 0.22, clampMax: 0.78, tacticalWeight: 0.17 };
 
+  // Per-round form variance: ±half of formVariance around 1.0.
+  // BO1 swings wildly (a T2 team can pop off for a whole map),
+  // BO5 stays tighter (consistency + prep wins out over 5 maps).
+  const tFormRoll = 1 - formatSettings.formVariance / 2 + Math.random() * formatSettings.formVariance;
+  const ctFormRoll = 1 - formatSettings.formVariance / 2 + Math.random() * formatSettings.formVariance;
+
+  // Tactical weight grows with format length: in BO5 the coach's prep and
+  // the IGL's mid-rounding matter more (deeper map pool, more adaptation).
+  const firepowerWeight = 0.3 - (formatSettings.tacticalWeight - 0.15);
   const tScore =
-    (tProfile.firepower * tFormRoll * 0.3 +
+    (tProfile.firepower * tFormRoll * firepowerWeight +
       tProfile.mapAdvantage * 0.2 +
       tProfile.econAdvantage * 0.25 +
-      tProfile.tacticalAdvantage * 0.15 +
+      tProfile.tacticalAdvantage * formatSettings.tacticalWeight +
       tProfile.momentum * 0.1) *
     mapConfig.baseT;
   const ctScore =
-    (ctProfile.firepower * ctFormRoll * 0.3 +
+    (ctProfile.firepower * ctFormRoll * firepowerWeight +
       ctProfile.mapAdvantage * 0.2 +
       ctProfile.econAdvantage * 0.25 +
-      ctProfile.tacticalAdvantage * 0.15 +
+      ctProfile.tacticalAdvantage * formatSettings.tacticalWeight +
       ctProfile.momentum * 0.1) *
     mapConfig.baseCT;
 
   let prob = tScore / Math.max(0.01, tScore + ctScore);
 
-  // Upset chance: ~7% of rounds the underdog gets a big form spike (plays
-  // out of their mind). This lets T2 teams steal rounds/maps from T1 teams
-  // the way real CS2 upsets work.
+  // Upset chance: the underdog gets a form spike. Higher in BO1 (one map,
+  // anything goes), lower in BO5 (prep + depth usually wins out).
   const tStrength = teamStrengthValue(tTeamState);
   const ctStrength = teamStrengthValue(ctTeamState);
   const underdogIsT = tStrength < ctStrength;
-  if (Math.random() < 0.07) {
+  if (Math.random() < formatSettings.upsetChance) {
     if (underdogIsT) {
-      prob = Math.min(0.72, prob + 0.18);
+      prob = Math.min(formatSettings.clampMax, prob + formatSettings.upsetBoost);
     } else {
-      prob = Math.max(0.28, prob - 0.18);
+      prob = Math.max(formatSettings.clampMin, prob - formatSettings.upsetBoost);
     }
   }
 
-  // Tighter clamp so even a much weaker team has a fighting chance each round
-  // (was 0.14-0.86, now 0.24-0.76). Over a 24-round map this produces far
-  // more competitive scorelines like 13-8, 11-13 instead of 13-2, 13-4.
-  return clamp(prob, 0.24, 0.76);
+  return clamp(prob, formatSettings.clampMin, formatSettings.clampMax);
 }
 
 function chooseStrategy(mapName, tTeamState) {
@@ -3458,7 +3467,8 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
     teamStates[ctKey],
     mapName,
     tKey === "teamA" ? preparedTeamA.totalLoadoutValue : preparedTeamB.totalLoadoutValue,
-    ctKey === "teamA" ? preparedTeamA.totalLoadoutValue : preparedTeamB.totalLoadoutValue
+    ctKey === "teamA" ? preparedTeamA.totalLoadoutValue : preparedTeamB.totalLoadoutValue,
+    roundContext?.matchFormat
   );
   const preRoundExpectancy =
     tKey === "teamA"
@@ -4146,6 +4156,7 @@ export function stepMatch(matchInput) {
       halfLabel: halfLabel(activeMap),
       timeoutCalled,
       roundType,
+      matchFormat: match.format,
     }
   );
 
