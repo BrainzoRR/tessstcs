@@ -60,6 +60,7 @@ import {
   formatMoney,
   getCompositeColor,
   getMapPriority,
+  getMapModifier,
   getRatingColor,
   getTeamStrength,
   normalizeTeam,

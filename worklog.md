@@ -607,3 +607,41 @@ Stage Summary:
 - PlayerDetailModal показывает таблицу per-team breakdown.
 - Архив: deploy-export/cs2-vercel-deploy.zip (676KB).
 - Tactical Preview / Side Swap Effect / Compare Players — следующие задачи (пользователь выбрал эти 3 идеи).
+
+---
+Task ID: captain-fix-tactical-preview-side-swap-compare
+Agent: Z.ai Code (main)
+Task: 1) Капитан любой роли (не только IGL) должен давать tactical bonus. 2) Tactical Preview. 3) Side Swap Effect. 4) Compare Players.
+
+Work Log:
+- Капитан бонус: переписал teamTactical в simulation.js. Теперь:
+  - Капитан жив (любая роль): +4% tactical
+  - Капитан = IGL: +7% (комбо)
+  - IGL жив но не капитан: +3%
+  - Никто (ни капитан ни IGL): -3% (потеря mid-rounding)
+  Это позволяет делать AWPer-капитана (Jame style) или двойной Entry состав без полной потери тактики.
+
+- Tactical Preview: новый компонент в MatchSetupView. Показывает:
+  - Win probability bar (A vs B в %)
+  - Favorite + upset chance + format
+  - Per-team breakdown: strength, role composition, best/worst map
+  - Map Pool & Side Swap таблица: для каждой карты — CT/T bias, preference обеих команд, favored team, recommended starting side с advantage %
+
+- Side Swap Effect: встроен в Map Pool таблицу. Показывает какую сторону выбрать после knife для каждой карты (CT если CT-sided и сильнее, T если T-sided). Advantage % = насколько старт с правильной стороны улучшает win prob.
+
+- Compare Players: кнопка "Compare" в Stats → Players (если 2+ игроков). Модалка:
+  - 2 dropdown для выбора игроков
+  - Таблица сравнения: 12 статов (Series, Rounds, K, D, K/D, ADR, KAST%, HS%, Impact, Rating, Openings, Clutches)
+  - Winner каждой категории подсвечен зелёным
+  - Edge column — кто выигрывает по стате
+  - Team history comparison если игроки играли за разные команды
+
+- Build проходит. Lint чистый.
+- Пересоздал архив (680KB).
+
+Stage Summary:
+- Капитан любой роли даёт tactical bonus (AWPer captain, double Entry — работают).
+- Tactical Preview на Match Setup: win%, map analysis, side recommendations.
+- Side Swap Effect: таблица показывает recommended side per map.
+- Compare Players: модалка сравнения 2 игроков по 12 статам + team history.
+- Архив: deploy-export/cs2-vercel-deploy.zip (680KB).
