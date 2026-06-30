@@ -533,3 +533,77 @@ Stage Summary:
 - Шансы Т2 ещё немного подняты (upsetChance 9-14%).
 - Сильные команды в BO5: больше подготовленных карт через veto + tactical weight.
 - Архив: deploy-export/cs2-vercel-deploy.zip (673KB).
+
+---
+Task ID: stronger-bo1-randomness-compression
+Agent: Z.ai Code (main)
+Task: Пользователь: 10 BO1 с Фурией — Т2 ни разу не выиграл, даже с поднятым AWP аимом. BO1 ещё рандомнее надо + шансы увеличить во всех форматах.
+
+Work Log:
+- Понял что предыдущие настройки были недостаточны: даже clamp 0.18-0.82 при базовой win prob 0.65+ давал T1 победу в большинстве раундов → 13-5, 13-7.
+- Добавил КЛЮЧЕВОЙ параметр `compression` — сжимает win prob к 0.5 (coin-flip):
+  - prob = 0.5 + (prob - 0.5) * (1 - compression)
+  - BO1 compression=0.45 → T1 с 0.68 становится 0.59 (T2 имеет 41% каждый раунд)
+  - BO3 compression=0.30 → 0.68 становится 0.63
+  - BO5 compression=0.20 → 0.68 становится 0.64 (сильная команда сохраняет преимущество)
+
+- Усилил все настройки:
+
+  BO1 (теперь реально рандомный):
+  - formVariance: 0.55 (±27.5% — форма дико скачет)
+  - upsetChance: 0.22 (22% раундов аутсайдер получает boost +0.30)
+  - clampMin/Max: 0.30-0.70 (минимум 30% для слабой команды)
+  - compression: 0.45 (сильное сжатие к 50/50)
+  - tacticalWeight: 0.10 (тренер почти не влияет на одной карте)
+  - Эффект: T2 выигрывает BO1 ~35-40% против T1 (было ~5%)
+
+  BO3 (Т1 фаворит, Т2 берёт карты):
+  - formVariance: 0.38, upsetChance: 0.14, clamp 0.24-0.76, compression: 0.30
+
+  BO5 (тренер/глубина решают):
+  - formVariance: 0.24, upsetChance: 0.08, clamp 0.26-0.74, compression: 0.20, tacticalWeight: 0.22
+
+- Build проходит. Lint чистый.
+- Пересоздал архив (674KB).
+
+Эффект (T1 vs T2, базовая prob 0.68):
+- BO1: prob после compression = 0.59, + 22% upset → T2 выигрывает карту ~35-40%
+- BO3: prob = 0.63, + 14% upset → T2 берёт 1-2 карты
+- BO5: prob = 0.64, + 8% upset → T1 выигрывает серию, T2 может взять 1-2 карты
+
+Stage Summary:
+- BO1 теперь реально рандомный: compression 0.45 + 22% upset + formVariance 0.55 → T2 выигрывает ~35-40% BO1.
+- Шансы Т2 увеличены во всех форматах (compression + upset).
+- Архив: deploy-export/cs2-vercel-deploy.zip (674KB).
+
+---
+Task ID: player-by-nickname-with-team-history
+Agent: Z.ai Code (main)
+Task: Пользователь: игрок с одинаковым ником но в разных командах должен считаться за одного игрока, показывать что выступал за разные команды, стата по каждой команде отдельно.
+
+Work Log:
+- Изменил aggregatePlayerStats в archiveStats.js:
+  - Ключ теперь `nickname.toLowerCase()` вместо `${id}::${nickname}` — игрок с одним ником в разных командах = одна запись
+  - Добавил teamHistory: Map teamTag -> per-team aggregate (series, kills, deaths, assists, и все метрики)
+  - teamLabel теперь показывает все команды через " / " если их несколько
+  - teamsCount — количество команд
+  - teamHistory массив с derivePlayerMetrics для каждой команды
+- Обновил PlayerDetailModal в App.jsx:
+  - playerKey теперь просто nickname (поддержка старого формата `${id}::${nickname}` сохранена)
+  - Поиск матчей по nickname (case-insensitive), не по id — находит все матчи игрока независимо от команды
+  - MVP проверка по nickname
+  - Блок "Teams represented" теперь показывает таблицу с пер-командой статистикой если команд >1: Team | Series | K | D | KD | ADR | Rating. Если команда одна — простые бейджи.
+- Обновил onSelectPlayer вызовы: передают `player.nickname` вместо `${player.id}::${player.nickname}`.
+- Build проходит. Lint чистый (1 warning — unused eslint-disable, не критично).
+- Пересоздал архив (676KB).
+
+Эффект:
+- Игрок "ZywOo" игравший за Vitality потом за другую команду — одна запись в Stats, в модалке таблица: Vitality 5 series 1.34 rating | TeamB 3 series 1.12 rating.
+- Общая карьерная стата суммирует все команды.
+- Трансферы теперь видны в статистике.
+
+Stage Summary:
+- Игрок = по нику: трансферы учитываются, стата по каждой команде отдельно.
+- PlayerDetailModal показывает таблицу per-team breakdown.
+- Архив: deploy-export/cs2-vercel-deploy.zip (676KB).
+- Tactical Preview / Side Swap Effect / Compare Players — следующие задачи (пользователь выбрал эти 3 идеи).

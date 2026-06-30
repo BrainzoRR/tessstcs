@@ -4134,6 +4134,173 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
           )}
         </Panel>
       </div>
+      {teamA && teamB && teamA.id !== teamB.id && <TacticalPreview teamA={teamA} teamB={teamB} format={setup.format} />}
+    </div>
+  );
+}
+
+function TacticalPreview({ teamA, teamB, format }) {
+  const { t } = useI18n();
+  const strengthA = getTeamStrength(teamA);
+  const strengthB = getTeamStrength(teamB);
+  const totalStrength = strengthA + strengthB;
+  const winChanceA = Math.round((strengthA / totalStrength) * 100);
+  const winChanceB = 100 - winChanceA;
+  const favorite = winChanceA > winChanceB ? teamA : winChanceB > winChanceA ? teamB : null;
+  const upsetChance = Math.min(winChanceA, winChanceB);
+
+  // Map veto prediction — which maps each team would pick/ban
+  const mapAnalysis = MAP_POOL.map((map) => {
+    const prioA = getMapPriority(teamA, map) * getMapModifier(teamA, map);
+    const prioB = getMapPriority(teamB, map) * getMapModifier(teamB, map);
+    const edge = prioA - prioB;
+    const cfg = MAP_CONFIGS[map];
+    return {
+      map,
+      edge,
+      teamAPref: prioA,
+      teamBPref: prioB,
+      favored: edge > 0.05 ? teamA.tag : edge < -0.05 ? teamB.tag : "Even",
+      sideBias: cfg.baseCT >= 0.52 ? "CT-sided" : cfg.baseT >= 0.52 ? "T-sided" : "Balanced",
+      ctPercent: Math.round(cfg.baseCT * 100),
+      tPercent: Math.round(cfg.baseT * 100),
+    };
+  }).sort((a, b) => Math.abs(b.edge) - Math.abs(a.edge));
+
+  const bestMapA = mapAnalysis.find((m) => m.edge > 0);
+  const bestMapB = [...mapAnalysis].reverse().find((m) => m.edge < 0);
+  const worstMapA = [...mapAnalysis].reverse().find((m) => m.edge < 0);
+
+  // Role breakdown
+  const roleBreakdown = (team) => {
+    const roles = {};
+    team.players.forEach((p) => { roles[p.role] = (roles[p.role] || 0) + 1; });
+    return Object.entries(roles).map(([role, count]) => `${count}× ${role}`).join(" · ");
+  };
+
+  // Side swap effect: show how CT/T sidedness affects each team
+  const sideAnalysis = MAP_POOL.slice(0, 4).map((map) => {
+    const cfg = MAP_CONFIGS[map];
+    const teamAStartCT = strengthA * cfg.baseCT + strengthB * cfg.baseT;
+    const teamAStartT = strengthA * cfg.baseT + strengthB * cfg.baseCT;
+    const ctAdvantage = teamAStartCT - teamAStartT;
+    return {
+      map,
+      ctPercent: Math.round(cfg.baseCT * 100),
+      tPercent: Math.round(cfg.baseT * 100),
+      teamAShouldStart: ctAdvantage > 0 ? "CT" : "T",
+      advantage: Math.abs(Math.round(ctAdvantage / (teamAStartCT + teamAStartT) * 100)),
+    };
+  });
+
+  return (
+    <div className="space-y-6">
+      <Panel title="Tactical Preview" subtitle="Pre-match forecast based on team strength, map pool, and role composition.">
+        {/* Win probability bar */}
+        <div className="rounded-2xl border border-border bg-card/60 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">{teamA.logo}</span>
+              <span className="font-display text-lg text-text">{teamA.name}</span>
+              <span className="numbers text-2xl font-bold" style={{ color: winChanceA >= 55 ? "#34d399" : winChanceA <= 45 ? "#f87171" : "#fbbf24" }}>
+                {winChanceA}%
+              </span>
+            </div>
+            <div className="text-xs uppercase tracking-[0.18em] text-muted">Win Chance</div>
+            <div className="flex items-center gap-2">
+              <span className="numbers text-2xl font-bold" style={{ color: winChanceB >= 55 ? "#34d399" : winChanceB <= 45 ? "#f87171" : "#fbbf24" }}>
+                {winChanceB}%
+              </span>
+              <span className="font-display text-lg text-text">{teamB.name}</span>
+              <span className="text-xl">{teamB.logo}</span>
+            </div>
+          </div>
+          <div className="flex h-3 overflow-hidden rounded-full">
+            <div className="bg-emerald-500/70" style={{ width: `${winChanceA}%` }} />
+            <div className="bg-red-500/70" style={{ width: `${winChanceB}%` }} />
+          </div>
+          {favorite && (
+            <div className="mt-2 text-center text-sm text-muted">
+              <span className="font-display text-accent">{favorite.name}</span> favored · upset chance <span className="numbers text-amber-300">{upsetChance}%</span> · format <span className="font-mono text-text">{format}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Role & strength breakdown */}
+        <div className={classNames("mt-4 grid gap-4", "grid-cols-2")}>
+          <div className="rounded-2xl border border-border bg-card/60 p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-lg">{teamA.logo}</span>
+              <span className="font-display text-text">{teamA.tag}</span>
+            </div>
+            <div className="text-xs uppercase tracking-[0.16em] text-muted">Strength</div>
+            <div className="numbers text-2xl font-bold text-accent">{strengthA}</div>
+            <div className="mt-2 text-xs text-muted">{roleBreakdown(teamA)}</div>
+            {bestMapA && <div className="mt-2 text-xs text-emerald-300">Best map: {bestMapA.map} (+{Math.round(bestMapA.edge * 100)}%)</div>}
+            {worstMapA && <div className="text-xs text-red-300/70">Worst map: {worstMapA.map} ({Math.round(worstMapA.edge * 100)}%)</div>}
+          </div>
+          <div className="rounded-2xl border border-border bg-card/60 p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-lg">{teamB.logo}</span>
+              <span className="font-display text-text">{teamB.tag}</span>
+            </div>
+            <div className="text-xs uppercase tracking-[0.16em] text-muted">Strength</div>
+            <div className="numbers text-2xl font-bold text-accent">{strengthB}</div>
+            <div className="mt-2 text-xs text-muted">{roleBreakdown(teamB)}</div>
+            {bestMapB && <div className="mt-2 text-xs text-emerald-300">Best map: {bestMapB.map} ({Math.round(bestMapB.edge * 100)}%)</div>}
+          </div>
+        </div>
+      </Panel>
+
+      {/* Map pool analysis with side swap effect */}
+      <Panel title="Map Pool & Side Swap" subtitle="Which maps favor each team and which side to pick after knife.">
+        <div className="overflow-x-auto cs2-scroll">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+                <th className="px-3 pb-3 font-semibold">Map</th>
+                <th className="px-2 pb-3 text-center font-semibold">Side Bias</th>
+                <th className="px-2 pb-3 text-center font-semibold">{teamA.tag} Pref</th>
+                <th className="px-2 pb-3 text-center font-semibold">{teamB.tag} Pref</th>
+                <th className="px-2 pb-3 text-center font-semibold">Favored</th>
+                <th className="px-3 pb-3 text-center font-semibold">{teamA.tag} Should Start</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mapAnalysis.map((m) => (
+                <tr key={m.map} className="border-t border-border/40">
+                  <td className="px-3 py-2.5 font-display text-lg text-text">{m.map}</td>
+                  <td className="px-2 py-2.5 text-center">
+                    <span className={classNames("rounded-md px-2 py-0.5 text-xs font-semibold", m.ctPercent >= 52 ? "bg-sky-500/15 text-sky-300" : m.tPercent >= 52 ? "bg-amber-500/15 text-amber-300" : "bg-zinc-500/15 text-zinc-300")}>
+                      CT {m.ctPercent}% / T {m.tPercent}%
+                    </span>
+                  </td>
+                  <td className="px-2 py-2.5 text-center numbers" style={{ color: m.edge > 0 ? "#34d399" : "#6b7280" }}>
+                    {Math.round(m.teamAPref * 100)}
+                  </td>
+                  <td className="px-2 py-2.5 text-center numbers" style={{ color: m.edge < 0 ? "#34d399" : "#6b7280" }}>
+                    {Math.round(m.teamBPref * 100)}
+                  </td>
+                  <td className="px-2 py-2.5 text-center font-semibold" style={{ color: m.favored === teamA.tag ? "#34d399" : m.favored === teamB.tag ? "#f87171" : "#6b7280" }}>
+                    {m.favored}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {(() => {
+                      const sa = sideAnalysis.find((s) => s.map === m.map);
+                      if (!sa) return "—";
+                      return (
+                        <span className={classNames("rounded-md px-2 py-0.5 text-xs font-bold", sa.teamAShouldStart === "CT" ? "bg-sky-500/15 text-sky-300" : "bg-amber-500/15 text-amber-300")}>
+                          {sa.teamAShouldStart} {sa.advantage > 0 ? `(+${sa.advantage}%)` : ""}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </div>
   );
 }
@@ -7161,6 +7328,7 @@ function StatsDataTable({ columns, rows, rowKey, onRowClick }) {
 
 function StatsView({ filters, onFiltersChange, options, overview, stats, mobile = false, onSelectPlayer }) {
   const [tab, setTab] = useState("players");
+  const [compareOpen, setCompareOpen] = useState(false);
   const setFilter = (key, value) => onFiltersChange((current) => ({ ...current, [key]: value }));
   const tabs = [
     { id: "players", label: "Players" },
@@ -7255,6 +7423,11 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
                 {tabItem.label}
               </button>
             ))}
+            {tab === "players" && stats.players.length >= 2 && (
+              <button type="button" onClick={() => setCompareOpen(true)} className="flex items-center gap-1.5 rounded-xl border border-accent/40 bg-accent/10 px-4 py-2 text-sm text-accent">
+                <Sword size={14} /> Compare
+              </button>
+            )}
           </div>
         }
       >
@@ -7265,6 +7438,142 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
           onRowClick={tab === "players" && onSelectPlayer ? (row) => onSelectPlayer(row.key) : undefined}
         />
       </Panel>
+      {compareOpen && (
+        <ComparePlayersModal players={stats.players} onClose={() => setCompareOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ComparePlayersModal({ players, onClose }) {
+  const [playerAKey, setPlayerAKey] = useState(players[0]?.key ?? "");
+  const [playerBKey, setPlayerBKey] = useState(players[1]?.key ?? "");
+  const playerA = players.find((p) => p.key === playerAKey);
+  const playerB = players.find((p) => p.key === playerBKey);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (!playerA || !playerB) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+        <div className="panel max-w-md rounded-2xl p-6 text-center" onClick={(e) => e.stopPropagation()}>
+          <div className="font-display text-2xl text-text">Need 2+ players</div>
+          <button type="button" onClick={onClose} className="mt-4 rounded-xl border border-border bg-card/70 px-4 py-2 text-sm text-text hover:bg-accent/10">Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  const statsList = [
+    { label: "Series", key: "seriesPlayed", higher: "A" },
+    { label: "Rounds", key: "roundsPlayed", higher: "A" },
+    { label: "Kills", key: "kills", higher: "A" },
+    { label: "Deaths", key: "deaths", higher: "B" },
+    { label: "K/D", key: "kd", format: (v) => v?.toFixed(2), higher: "A" },
+    { label: "ADR", key: "adr", higher: "A" },
+    { label: "KAST%", key: "kastPercent", format: (v) => `${v}%`, higher: "A" },
+    { label: "HS%", key: "hsPercent", format: (v) => `${v}%`, higher: "A" },
+    { label: "Impact", key: "impact", format: (v) => v?.toFixed(2), higher: "A" },
+    { label: "Rating", key: "rating", format: (v) => v?.toFixed(2), higher: "A" },
+    { label: "Openings", key: "openingKills", higher: "A" },
+    { label: "Clutches", key: "clutchesWon", format: (v) => `${v}`, higher: "A" },
+  ];
+
+  const getVal = (p, stat) => stat.format ? stat.format(p[stat.key]) : p[stat.key];
+  const isWinner = (stat) => {
+    const a = playerA[stat.key] ?? 0;
+    const b = playerB[stat.key] ?? 0;
+    if (stat.higher === "A") return a > b ? "A" : b > a ? "B" : "tie";
+    return a < b ? "A" : b < a ? "B" : "tie";
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="panel max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-border bg-gradient-to-r from-accent/10 to-transparent px-6 py-4">
+          <div className="font-display text-2xl text-text">Compare Players</div>
+          <button type="button" onClick={onClose} className="rounded-xl border border-border bg-card/70 px-3 py-2 text-sm text-text hover:bg-accent/10">✕</button>
+        </div>
+        <div className="max-h-[calc(90vh-80px)] overflow-y-auto scrollbar-thin p-6">
+          <div className="mb-6 grid grid-cols-2 gap-4">
+            <div>
+              <div className="mb-1 text-xs uppercase tracking-[0.16em] text-muted">Player A</div>
+              <select value={playerAKey} onChange={(e) => setPlayerAKey(e.target.value)} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-text">
+                {players.map((p) => <option key={p.key} value={p.key}>{p.nickname} ({p.teamLabel})</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="mb-1 text-xs uppercase tracking-[0.16em] text-muted">Player B</div>
+              <select value={playerBKey} onChange={(e) => setPlayerBKey(e.target.value)} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-text">
+                {players.map((p) => <option key={p.key} value={p.key}>{p.nickname} ({p.teamLabel})</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto cs2-scroll">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+                  <th className="px-3 pb-3 font-semibold">Stat</th>
+                  <th className="px-3 pb-3 text-center font-display text-lg text-text">{playerA.nickname}</th>
+                  <th className="px-3 pb-3 text-center font-display text-lg text-text">{playerB.nickname}</th>
+                  <th className="px-3 pb-3 text-center font-semibold">Edge</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statsList.map((stat) => {
+                  const winner = isWinner(stat);
+                  return (
+                    <tr key={stat.key} className="border-t border-border/40">
+                      <td className="px-3 py-2.5 text-muted">{stat.label}</td>
+                      <td className={classNames("px-3 py-2.5 text-center numbers font-bold", winner === "A" ? "text-emerald-300" : "text-text")}>
+                        {getVal(playerA, stat)}
+                      </td>
+                      <td className={classNames("px-3 py-2.5 text-center numbers font-bold", winner === "B" ? "text-emerald-300" : "text-text")}>
+                        {getVal(playerB, stat)}
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        {winner === "tie" ? <span className="text-muted">—</span> :
+                          <span className={classNames("text-xs font-bold uppercase", winner === "A" ? "text-emerald-300" : "text-sky-300")}>
+                            {winner === "A" ? playerA.nickname.slice(0, 4) : playerB.nickname.slice(0, 4)}
+                          </span>
+                        }
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {(playerA.teamHistory?.length > 1 || playerB.teamHistory?.length > 1) && (
+            <div className="mt-6 grid grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-border bg-card/60 p-4">
+                <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted">{playerA.nickname} teams</div>
+                {(playerA.teamHistory ?? []).map((t) => (
+                  <div key={t.teamTag} className="flex justify-between text-sm">
+                    <span className="text-accent">{t.teamTag}</span>
+                    <span className="numbers text-muted">{t.seriesPlayed} series · {(t.rating ?? 1).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-2xl border border-border bg-card/60 p-4">
+                <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted">{playerB.nickname} teams</div>
+                {(playerB.teamHistory ?? []).map((t) => (
+                  <div key={t.teamTag} className="flex justify-between text-sm">
+                    <span className="text-accent">{t.teamTag}</span>
+                    <span className="numbers text-muted">{t.seriesPlayed} series · {(t.rating ?? 1).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -7470,7 +7779,7 @@ function StatsTable({ players, showTeam = false, onSelectPlayer }) {
                 "border-t border-border",
                 onSelectPlayer && "cursor-pointer transition-colors hover:bg-accent/10"
               )}
-              onClick={onSelectPlayer ? () => onSelectPlayer(`${player.id}::${player.nickname}`) : undefined}
+              onClick={onSelectPlayer ? () => onSelectPlayer(player.nickname) : undefined}
             >
               <td className="truncate px-3 py-3 font-display text-xl text-text">
                 <span className="inline-flex items-center gap-2">
@@ -7565,20 +7874,24 @@ function HistoryView({ filters, onFiltersChange, options, overview, entries, onO
 function PlayerDetailModal({ playerKey, matchHistory, onClose }) {
   const [tab, setTab] = useState("overview");
 
-  // playerKey is `${id}::${nickname}` (matches aggregatePlayerStats key)
-  const [playerId, playerNickname] = useMemo(() => {
+  // playerKey is now just the nickname (case-insensitive). The old format
+  // `${id}::${nickname}` is still supported for backwards compat.
+  const playerNickname = useMemo(() => {
     const sep = playerKey.indexOf("::");
-    if (sep === -1) return [playerKey, ""];
-    return [playerKey.slice(0, sep), playerKey.slice(sep + 2)];
+    if (sep === -1) return playerKey;
+    return playerKey.slice(sep + 2);
   }, [playerKey]);
+  const playerNicknameLower = playerNickname.toLowerCase();
+  const safeNick = (v) => (typeof v === "string" ? v : "");
 
-  // Collect every match where this player appeared (only stats-included matches)
+  // Collect every match where this player appeared (matched by nickname only
+  // so transfers — different player.id, same nickname — are all included).
   const matches = useMemo(() => {
     return (matchHistory ?? [])
       .filter((entry) => entry.includedInStats !== false && entry.data)
       .map((entry) => {
         const player = (entry.data.players ?? []).find(
-          (p) => p.id === playerId && p.nickname === playerNickname
+          (p) => safeNick(p.nickname).toLowerCase() === playerNicknameLower
         );
         if (!player) return null;
         return {
@@ -7591,7 +7904,7 @@ function PlayerDetailModal({ playerKey, matchHistory, onClose }) {
       })
       .filter(Boolean)
       .sort((a, b) => new Date(b.entry.date) - new Date(a.entry.date));
-  }, [matchHistory, playerId, playerNickname]);
+  }, [matchHistory, playerNicknameLower]);
 
   // Aggregate career totals
   const career = useMemo(() => {
@@ -7625,7 +7938,7 @@ function PlayerDetailModal({ playerKey, matchHistory, onClose }) {
       if (p.teamKey === m.winnerKey) agg.wins += 1;
       else agg.losses += 1;
       const mvp = m.entry?.data?.mvp;
-      if (mvp && (mvp.id === playerId || mvp.nickname === playerNickname)) agg.mvpCount += 1;
+      if (mvp && safeNick(mvp.nickname).toLowerCase() === playerNicknameLower) agg.mvpCount += 1;
     }
     const rp = Math.max(1, agg.roundsPlayed);
     const kpr = agg.kills / rp;
@@ -7644,7 +7957,7 @@ function PlayerDetailModal({ playerKey, matchHistory, onClose }) {
     agg.impact = Math.round(impact * 100) / 100;
     agg.teamLabel = agg.teams.size === 1 ? [...agg.teams][0] : ([...agg.teams].filter(Boolean).join(", ") || "Multi");
     return agg;
-  }, [matches, playerId, playerNickname]);
+  }, [matches, playerNicknameLower]);
 
   // Close on Escape + lock scroll
   useEffect(() => {
@@ -7761,14 +8074,49 @@ function PlayerDetailModal({ playerKey, matchHistory, onClose }) {
                 </div>
               </div>
 
-              {/* Teams played for */}
+              {/* Teams played for — per-team stats breakdown */}
               <div className="rounded-2xl border border-border bg-card/60 p-4">
-                <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted">Teams represented</div>
-                <div className="flex flex-wrap gap-2">
-                  {[...career.teams].filter(Boolean).map((t) => (
-                    <span key={t} className="rounded-lg border border-border bg-surface px-3 py-1 text-sm text-text">{t}</span>
-                  ))}
+                <div className="mb-3 text-xs uppercase tracking-[0.18em] text-muted">
+                  Teams represented ({career.teamsCount ?? career.teams.size})
                 </div>
+                {(career.teamHistory ?? []).length > 1 ? (
+                  <div className="overflow-x-auto cs2-scroll">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+                          <th className="px-2 py-1.5 font-semibold">Team</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">Series</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">K</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">D</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">KD</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">ADR</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">Rating</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(career.teamHistory ?? []).map((t) => (
+                          <tr key={t.teamTag} className="border-t border-border/40">
+                            <td className="px-2 py-1.5 font-semibold text-accent">{t.teamTag || "—"}</td>
+                            <td className="px-2 py-1.5 text-center numbers text-muted">{t.seriesPlayed}</td>
+                            <td className="px-2 py-1.5 text-center numbers text-emerald-300">{t.kills}</td>
+                            <td className="px-2 py-1.5 text-center numbers text-red-300/80">{t.deaths}</td>
+                            <td className="px-2 py-1.5 text-center numbers">{t.kd?.toFixed(2) ?? "—"}</td>
+                            <td className="px-2 py-1.5 text-center numbers">{t.adr ?? "—"}</td>
+                            <td className="px-2 py-1.5 text-center numbers font-bold" style={{ color: getRatingColor(t.rating ?? 1) }}>
+                              {(t.rating ?? 1).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {[...career.teams].filter(Boolean).map((t) => (
+                      <span key={t} className="rounded-lg border border-border bg-surface px-3 py-1 text-sm text-text">{t}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : (

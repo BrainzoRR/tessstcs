@@ -2522,15 +2522,31 @@ function teamTactical(teamState, mapName) {
   const mapConfig = MAP_CONFIGS[mapName];
   const base =
     (teamAverage(teamState, "gameSense") + teamState.team.coach.tacticalRating / 2) / 100;
+
+  // Captain gives a tactical bonus when alive — regardless of role. This lets
+  // you run an AWPer captain (like Jame) or double-entry comp without losing
+  // all tactical cohesion. An IGL captain stacks slightly higher (calling +
+  // leading), a non-IGL captain still calls but relies more on gameSense.
+  const aliveCaptain = teamState.players.some((player) => player.isCaptain && player.alive);
+  const captainIsIgl = teamState.players.some(
+    (player) => player.isCaptain && player.role === "IGL" && player.alive
+  );
   const aliveIgl = teamState.players.some(
     (player) => player.role === "IGL" && player.alive
   );
+  // Captain alive: +4%. Captain is also IGL: +7% total. IGL alive but not
+  // captain (rare): +3%. No captain/IGL alive: -3% (lost mid-rounding).
+  let roleMultiplier = 1;
+  if (captainIsIgl) roleMultiplier = 1.07;
+  else if (aliveCaptain) roleMultiplier = 1.04;
+  else if (aliveIgl) roleMultiplier = 1.03;
+  else roleMultiplier = 0.97;
 
   return clamp(
     base *
       getMapModifier(teamState.team, mapName) *
       mapConfig.gameSenseWeight *
-      (aliveIgl ? 1.05 : 1),
+      roleMultiplier,
     0.2,
     1.5
   );

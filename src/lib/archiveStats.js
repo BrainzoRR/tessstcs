@@ -303,14 +303,19 @@ export function aggregatePlayerStats(entries) {
 
   filterArchiveEntries(entries, createArchiveFilters(), { statsOnly: true }).forEach((entry) => {
     safeArray(entry.data?.players).forEach((player) => {
-      const key = `${safeString(player.id, player.nickname)}::${safeString(player.nickname, "player")}`;
+      // Key by nickname only (not id) so a player who transferred teams —
+      // different player.id but same nickname — is counted as ONE player
+      // across all their appearances. teamHistory tracks each team they
+      // played for with per-team stats.
+      const nick = safeString(player.nickname, "player");
+      const key = nick.toLowerCase();
       if (!players.has(key)) {
         players.set(key, {
           key,
-          id: player.id,
-          nickname: player.nickname,
+          nickname: nick,
           role: player.role,
           teams: new Set(),
+          teamHistory: new Map(), // teamTag -> per-team aggregate
           seriesPlayed: 0,
           kills: 0,
           deaths: 0,
@@ -333,7 +338,38 @@ export function aggregatePlayerStats(entries) {
       const aggregate = players.get(key);
       aggregate.seriesPlayed += 1;
       aggregate.role = player.role;
-      aggregate.teams.add(player.teamTag ?? player.teamName ?? "");
+      const teamTag = safeString(player.teamTag ?? player.teamName, "");
+      aggregate.teams.add(teamTag);
+
+      // Per-team history
+      if (!aggregate.teamHistory.has(teamTag)) {
+        aggregate.teamHistory.set(teamTag, {
+          teamTag,
+          seriesPlayed: 0,
+          kills: 0, deaths: 0, assists: 0, damage: 0, headshots: 0,
+          openingKills: 0, entriesWon: 0, clutchesWon: 0, clutchAttempts: 0,
+          flashAssists: 0, roundsPlayed: 0, kastRounds: 0, survivedRounds: 0,
+          tradedRounds: 0, bestRoundKills: 0,
+        });
+      }
+      const teamAgg = aggregate.teamHistory.get(teamTag);
+      teamAgg.seriesPlayed += 1;
+      teamAgg.kills += player.kills ?? 0;
+      teamAgg.deaths += player.deaths ?? 0;
+      teamAgg.assists += player.assists ?? 0;
+      teamAgg.damage += player.damage ?? 0;
+      teamAgg.headshots += player.headshots ?? 0;
+      teamAgg.openingKills += player.openingKills ?? 0;
+      teamAgg.entriesWon += player.entriesWon ?? 0;
+      teamAgg.clutchesWon += player.clutchesWon ?? 0;
+      teamAgg.clutchAttempts += player.clutchAttempts ?? 0;
+      teamAgg.flashAssists += player.flashAssists ?? 0;
+      teamAgg.roundsPlayed += player.roundsPlayed ?? 0;
+      teamAgg.kastRounds += player.kastRounds ?? 0;
+      teamAgg.survivedRounds += player.survivedRounds ?? 0;
+      teamAgg.tradedRounds += player.tradedRounds ?? 0;
+      teamAgg.bestRoundKills = Math.max(teamAgg.bestRoundKills, player.bestRoundKills ?? 0);
+
       aggregate.kills += player.kills ?? 0;
       aggregate.deaths += player.deaths ?? 0;
       aggregate.assists += player.assists ?? 0;
@@ -353,11 +389,24 @@ export function aggregatePlayerStats(entries) {
   });
 
   return [...players.values()]
-    .map((player) => ({
-      ...player,
-      teamLabel: player.teams.size === 1 ? [...player.teams][0] : "Multi",
-      ...derivePlayerMetrics(player),
-    }))
+    .map((player) => {
+      // Build per-team breakdown with derived metrics
+      const teamBreakdown = [...player.teamHistory.values()].map((teamAgg) => ({
+        teamTag: teamAgg.teamTag,
+        seriesPlayed: teamAgg.seriesPlayed,
+        ...derivePlayerMetrics(teamAgg),
+        kills: teamAgg.kills,
+        deaths: teamAgg.deaths,
+        assists: teamAgg.assists,
+      }));
+      return {
+        ...player,
+        teamLabel: player.teams.size === 1 ? [...player.teams][0] : [...player.teams].filter(Boolean).join(" / "),
+        teamsCount: player.teams.size,
+        teamHistory: teamBreakdown,
+        ...derivePlayerMetrics(player),
+      };
+    })
     .sort((left, right) => right.rating - left.rating || right.kills - left.kills);
 }
 
