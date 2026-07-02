@@ -99,12 +99,8 @@ const HEAVY_MAP_KEYS_CLIENT = new Set([
 ]);
 const HEAVY_ROUND_KEYS_CLIENT = new Set([
   "logs",
-  "timeline",
   "startLoadouts",
   "loadouts",
-  "playerRoundStats",
-  "preRoundExpectancy",
-  "spectatorLeaders",
 ]);
 function slimEntryForSync(entry) {
   if (!entry || typeof entry !== "object") return entry;
@@ -125,7 +121,16 @@ function slimEntryForSync(entry) {
           const slim = {};
           for (const key of Object.keys(r)) {
             if (HEAVY_ROUND_KEYS_CLIENT.has(key)) continue;
-            slim[key] = r[key];
+            // Strip `snapshot` from timeline events but keep the rest
+            if (key === "timeline" && Array.isArray(r[key])) {
+              slim[key] = r[key].map((event) => {
+                if (!event || typeof event !== "object") return event;
+                const { snapshot, ...eventRest } = event;
+                return eventRest;
+              });
+            } else {
+              slim[key] = r[key];
+            }
           }
           return slim;
         });
@@ -1974,6 +1979,7 @@ function App() {
                 onSetupChange={setMatchSetup}
                 onStartVeto={handleStartVeto}
                 canStartMatch={canStartMatch}
+                matchHistory={state.matchHistory}
               />
             )}
             {resolvedActiveView === "veto" && resolvedCurrentMatch && (
@@ -3934,7 +3940,7 @@ function TeamSetupPreview({ team }) {
   );
 }
 
-function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVeto, canStartMatch }) {
+function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVeto, canStartMatch, matchHistory = [] }) {
   const { t } = useI18n();
   const teamA = teams.find((team) => team.id === setup.teamAId);
   const teamB = teams.find((team) => team.id === setup.teamBId);
@@ -4135,12 +4141,12 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
           )}
         </Panel>
       </div>
-      {teamA && teamB && teamA.id !== teamB.id && <TacticalPreview teamA={teamA} teamB={teamB} format={setup.format} />}
+      {teamA && teamB && teamA.id !== teamB.id && <TacticalPreview teamA={teamA} teamB={teamB} format={setup.format} matchHistory={matchHistory} />}
     </div>
   );
 }
 
-function TacticalPreview({ teamA, teamB, format }) {
+function TacticalPreview({ teamA, teamB, format, matchHistory = [] }) {
   const { t } = useI18n();
   const strengthA = getTeamStrength(teamA);
   const strengthB = getTeamStrength(teamB);
@@ -4194,8 +4200,117 @@ function TacticalPreview({ teamA, teamB, format }) {
     };
   });
 
+  // Head-to-Head from matchHistory
+  const h2h = useMemo(() => {
+    const nameA = teamA.name.toLowerCase();
+    const nameB = teamB.name.toLowerCase();
+    const meetings = matchHistory
+      .filter((e) => {
+        if (!e.data) return false;
+        const ta = e.data.teamA?.name?.toLowerCase();
+        const tb = e.data.teamB?.name?.toLowerCase();
+        return (ta === nameA && tb === nameB) || (ta === nameB && tb === nameA);
+      })
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    let winsA = 0, winsB = 0;
+    const recent = meetings.slice(0, 5).map((e) => {
+      const aIsA = e.data.teamA.name.toLowerCase() === nameA;
+      const winnerKey = e.data.winnerKey;
+      const aWon = (aIsA && winnerKey === "teamA") || (!aIsA && winnerKey === "teamB");
+      if (aWon) winsA++; else winsB++;
+      return { date: e.matchDate, score: e.score, aWon, teams: e.teams };
+    });
+    return { total: meetings.length, winsA, winsB, recent };
+  }, [matchHistory, teamA.name, teamB.name]);
+
+  // Team Form — last 5 matches for each team
+  const teamForm = useMemo(() => {
+    const getForm = (teamName) => {
+      const name = teamName.toLowerCase();
+      return matchHistory
+        .filter((e) => {
+          if (!e.data) return false;
+          return e.data.teamA?.name?.toLowerCase() === name || e.data.teamB?.name?.toLowerCase() === name;
+        })
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 5)
+        .map((e) => {
+          const isA = e.data.teamA.name.toLowerCase() === name;
+          const winnerKey = e.data.winnerKey;
+          const won = (isA && winnerKey === "teamA") || (!isA && winnerKey === "teamB");
+          return { won, score: e.score, opp: isA ? e.data.teamB?.tag : e.data.teamA?.tag };
+        });
+    };
+    return { formA: getForm(teamA.name), formB: getForm(teamB.name) };
+  }, [matchHistory, teamA.name, teamB.name]);
+
   return (
     <div className="space-y-6">
+      {/* Head-to-Head */}
+      {h2h.total > 0 && (
+        <Panel title="Head-to-Head" subtitle={`Previous meetings: ${h2h.total} series`}>
+          <div className="flex items-center justify-between rounded-2xl border border-border bg-card/60 p-4">
+            <div className="text-center">
+              <div className="font-display text-3xl text-emerald-300">{h2h.winsA}</div>
+              <div className="text-xs uppercase tracking-wide text-muted">{teamA.tag}</div>
+            </div>
+            <div className="text-center text-muted">
+              <div className="text-sm">All-time</div>
+              <div className="text-xs">{h2h.winsA + h2h.winsB > 0 ? `${Math.round(h2h.winsA / (h2h.winsA + h2h.winsB) * 100)}% - ${Math.round(h2h.winsB / (h2h.winsA + h2h.winsB) * 100)}%` : "—"}</div>
+            </div>
+            <div className="text-center">
+              <div className="font-display text-3xl text-red-300">{h2h.winsB}</div>
+              <div className="text-xs uppercase tracking-wide text-muted">{teamB.tag}</div>
+            </div>
+          </div>
+          {h2h.recent.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {h2h.recent.map((m, i) => (
+                <span key={i} className={classNames("rounded-md px-2 py-1 text-xs font-bold", m.aWon ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300")}>
+                  {m.aWon ? "W" : "L"} {m.score}
+                </span>
+              ))}
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {/* Team Form */}
+      {(teamForm.formA.length > 0 || teamForm.formB.length > 0) && (
+        <Panel title="Recent Form" subtitle="Last 5 matches for each team">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-border bg-card/60 p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-lg">{teamA.logo}</span>
+                <span className="font-display text-text">{teamA.tag}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {teamForm.formA.map((m, i) => (
+                  <span key={i} className={classNames("rounded-md px-2 py-1 text-xs font-bold", m.won ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300")}>
+                    {m.won ? "W" : "L"} vs {m.opp} {m.score}
+                  </span>
+                ))}
+                {teamForm.formA.length === 0 && <span className="text-xs text-muted">No matches yet</span>}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card/60 p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-lg">{teamB.logo}</span>
+                <span className="font-display text-text">{teamB.tag}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {teamForm.formB.map((m, i) => (
+                  <span key={i} className={classNames("rounded-md px-2 py-1 text-xs font-bold", m.won ? "bg-emerald-500/15 text-emerald-300" : "bg-red-500/15 text-red-300")}>
+                    {m.won ? "W" : "L"} vs {m.opp} {m.score}
+                  </span>
+                ))}
+                {teamForm.formB.length === 0 && <span className="text-xs text-muted">No matches yet</span>}
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       <Panel title="Tactical Preview" subtitle="Pre-match forecast based on team strength, map pool, and role composition.">
         {/* Win probability bar */}
         <div className="rounded-2xl border border-border bg-card/60 p-4">
@@ -7360,6 +7475,12 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
     { key: "roundDiff", label: "Round Diff", align: "right" },
     { key: "ctWinRate", label: "CT WR%", align: "right" },
     { key: "tWinRate", label: "T WR%", align: "right" },
+    { key: "streak", label: "Streak", align: "right", render: (row) => {
+      const s = row.streak;
+      if (!s) return "—";
+      const icon = s.type === "W" ? "🔥" : "❄️";
+      return `${icon} ${s.count}${s.type}`;
+    }},
   ];
 
   const mapsColumns = [
@@ -7442,6 +7563,31 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
       {compareOpen && (
         <ComparePlayersModal players={stats.players} onClose={() => setCompareOpen(false)} />
       )}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            const rows = tab === "players" ? stats.players : tab === "teams" ? stats.teams : tab === "maps" ? stats.maps : stats.tournaments;
+            if (!rows || rows.length === 0) return;
+            const headers = Object.keys(rows[0]).filter((k) => typeof rows[0][k] !== "object" && rows[0][k] !== undefined);
+            const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => {
+              const v = r[h];
+              if (v == null) return "";
+              if (typeof v === "string" && v.includes(",")) return `"${v}"`;
+              return v;
+            }).join(","))].join("\n");
+            const blob = new Blob([csv], { type: "text/csv" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `cs2_${tab}_stats_${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+          }}
+          className="flex items-center gap-1.5 rounded-xl border border-border bg-card/70 px-4 py-2 text-sm text-muted hover:text-accent"
+        >
+          <Download size={14} /> Export CSV
+        </button>
+      </div>
     </div>
   );
 }

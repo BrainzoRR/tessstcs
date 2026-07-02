@@ -21,13 +21,16 @@ export function entryToRow(entry: MatchHistoryEntryInput) {
   const rawData = (entry.data ?? {}) as Record<string, any>;
 
   // Strip heavy fields before serializing to avoid Vercel's 4.5MB request
-  // body limit. A BO5 match (5 maps × ~24 rounds) with full live-state can
-  // reach 2-5MB because each round carries logs, timeline, loadouts, and
-  // per-round player stats. The UI (History, Stats, Results, PlayerDetail)
-  // only needs: map metadata (name/score/winner/halves), round type wins,
-  // the round outcome summary (winner/side/type), and the aggregated
-  // `players` array. Everything else is live-match commentary that is
-  // never read back from the archive.
+  // body limit. We keep enough data for Analyst Desk (expectancy curves,
+  // round swings, player form board) and heatmaps (death markers via
+  // timeline zone/site metadata), while stripping the truly heavy parts:
+  // - teamAPlayers/teamBPlayers: full live-state player objects (2.5MB)
+  // - logs: redundant with timeline
+  // - startLoadouts/loadouts: full weapon+armor snapshots per player per round
+  // - snapshot inside timeline events: full game state copy (~3KB each)
+  // We KEEP: playerRoundStats, preRoundExpectancy, spectatorLeaders, and
+  // timeline (with snapshot stripped from each event). This lets Analyst Desk
+  // and heatmaps work on saved matches while staying ~300-500KB per BO5.
   const HEAVY_MAP_KEYS = new Set([
     "teamAPlayers",
     "teamBPlayers",
@@ -36,12 +39,8 @@ export function entryToRow(entry: MatchHistoryEntryInput) {
   ]);
   const HEAVY_ROUND_KEYS = new Set([
     "logs",
-    "timeline",
     "startLoadouts",
     "loadouts",
-    "playerRoundStats",
-    "preRoundExpectancy",
-    "spectatorLeaders",
   ]);
   const data: Record<string, any> = { ...rawData };
   if (Array.isArray(data.maps)) {
@@ -52,16 +51,27 @@ export function entryToRow(entry: MatchHistoryEntryInput) {
         if (HEAVY_MAP_KEYS.has(key)) continue;
         rest[key] = m[key];
       }
-      // Slim down each round: keep only the outcome metadata used by
-      // History/Stats (roundNumber, winnerKey, winnerSide, roundType,
-      // scoreAfter, reason, bombPlanted, plantSite, halfLabel).
+      // Slim down each round: strip logs/startLoadouts/loadouts but KEEP
+      // playerRoundStats, preRoundExpectancy, spectatorLeaders, timeline.
+      // For timeline, strip the heavy `snapshot` field from each event
+      // (full game state ~3KB each) but keep event metadata (kind, clock,
+      // zone, site, label, meta) for analyst desk and heatmap markers.
       if (Array.isArray(rest.rounds)) {
         rest.rounds = rest.rounds.map((r: any) => {
           if (!r || typeof r !== "object") return r;
           const slim: Record<string, any> = {};
           for (const key of Object.keys(r)) {
             if (HEAVY_ROUND_KEYS.has(key)) continue;
-            slim[key] = r[key];
+            // Strip `snapshot` from timeline events but keep the rest
+            if (key === "timeline" && Array.isArray(r[key])) {
+              slim[key] = r[key].map((event: any) => {
+                if (!event || typeof event !== "object") return event;
+                const { snapshot, ...eventRest } = event;
+                return eventRest;
+              });
+            } else {
+              slim[key] = r[key];
+            }
           }
           return slim;
         });

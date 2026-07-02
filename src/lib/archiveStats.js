@@ -195,6 +195,10 @@ function matchesSearch(entry, searchValue) {
     entry.mapsPlayed,
     ...getHistoryEntryTeamNames(entry),
     ...getHistoryEntryMapNames(entry),
+    // Also search by player nicknames so admins can find all matches a
+    // specific player appeared in (e.g. typing "ZywOo" finds every match
+    // where ZywOo played, regardless of team).
+    ...(Array.isArray(entry.data?.players) ? entry.data.players.map((p) => p.nickname) : []),
   ]
     .filter(Boolean)
     .join(" ")
@@ -445,6 +449,7 @@ export function aggregateTeamStats(entries) {
           fullWins: 0,
           antiEcoWins: 0,
           tournaments: new Set(),
+          resultsByDate: [], // {date, won} for streak calculation
         });
       }
 
@@ -453,8 +458,10 @@ export function aggregateTeamStats(entries) {
       aggregate.tournaments.add(entry.tournamentName);
       if (results.winnerKey === key) {
         aggregate.seriesWins += 1;
+        aggregate.resultsByDate.push({ date: entry.matchDate || entry.date, won: true });
       } else {
         aggregate.seriesLosses += 1;
+        aggregate.resultsByDate.push({ date: entry.matchDate || entry.date, won: false });
       }
 
       safeArray(results.maps).forEach((map) => {
@@ -495,15 +502,30 @@ export function aggregateTeamStats(entries) {
   });
 
   return [...teams.values()]
-    .map((team) => ({
-      ...team,
-      roundDiff: team.roundsWon - team.roundsLost,
-      seriesWinRate: roundMetric((team.seriesWins / Math.max(1, team.seriesPlayed)) * 100, 1),
-      mapWinRate: roundMetric((team.mapsWon / Math.max(1, team.mapsPlayed)) * 100, 1),
-      ctWinRate: roundMetric((team.ctRoundsWon / Math.max(1, team.ctRoundsPlayed)) * 100, 1),
-      tWinRate: roundMetric((team.tRoundsWon / Math.max(1, team.tRoundsPlayed)) * 100, 1),
-      tournamentsCount: team.tournaments.size,
-    }))
+    .map((team) => {
+      // Calculate current streak from most recent results
+      const sorted = [...team.resultsByDate].sort((a, b) => new Date(b.date) - new Date(a.date));
+      let streak = null;
+      if (sorted.length > 0) {
+        const latestWon = sorted[0].won;
+        let count = 0;
+        for (const r of sorted) {
+          if (r.won === latestWon) count++;
+          else break;
+        }
+        streak = { type: latestWon ? "W" : "L", count };
+      }
+      return {
+        ...team,
+        roundDiff: team.roundsWon - team.roundsLost,
+        seriesWinRate: roundMetric((team.seriesWins / Math.max(1, team.seriesPlayed)) * 100, 1),
+        mapWinRate: roundMetric((team.mapsWon / Math.max(1, team.mapsPlayed)) * 100, 1),
+        ctWinRate: roundMetric((team.ctRoundsWon / Math.max(1, team.ctRoundsPlayed)) * 100, 1),
+        tWinRate: roundMetric((team.tRoundsWon / Math.max(1, team.tRoundsPlayed)) * 100, 1),
+        tournamentsCount: team.tournaments.size,
+        streak,
+      };
+    })
     .sort((left, right) => right.seriesWins - left.seriesWins || right.mapWinRate - left.mapWinRate);
 }
 
