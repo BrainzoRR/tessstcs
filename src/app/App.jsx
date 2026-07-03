@@ -2045,6 +2045,7 @@ function App() {
                 overview={archiveOverview}
                 stats={statsViewModel}
                 onSelectPlayer={setSelectedPlayerKey}
+                matchHistory={state.matchHistory}
               />
             )}
           </div>
@@ -7442,7 +7443,7 @@ function StatsDataTable({ columns, rows, rowKey, onRowClick }) {
   );
 }
 
-function StatsView({ filters, onFiltersChange, options, overview, stats, mobile = false, onSelectPlayer }) {
+function StatsView({ filters, onFiltersChange, options, overview, stats, mobile = false, onSelectPlayer, matchHistory = [] }) {
   const [tab, setTab] = useState("players");
   const [compareOpen, setCompareOpen] = useState(false);
   const setFilter = (key, value) => onFiltersChange((current) => ({ ...current, [key]: value }));
@@ -7451,6 +7452,8 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
     { id: "teams", label: "Teams" },
     { id: "maps", label: "Maps" },
     { id: "tournaments", label: "Tournaments" },
+    { id: "clutches", label: "Clutches" },
+    { id: "openings", label: "Openings" },
   ];
 
   const playersColumns = [
@@ -7506,11 +7509,129 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
     { key: "topMvp", label: "Final MVP", render: (row) => row.hasFinal && row.topMvp !== "-" ? `${row.topMvp}${row.topMvpRating != null ? ` (${row.topMvpRating})` : ""}` : "—" },
   ];
 
+  // Clutch database — extract all clutches from matchHistory
+  const clutchData = useMemo(() => {
+    const clutches = [];
+    const playerAgg = new Map();
+    (matchHistory ?? []).forEach((entry) => {
+      if (entry.includedInStats === false || !entry.data) return;
+      (entry.data.maps ?? []).forEach((map) => {
+        (map.rounds ?? []).forEach((round) => {
+          if (round.clutch) {
+            const c = round.clutch;
+            const clutchEntry = {
+              nickname: c.nickname,
+              size: c.size,
+              teamKey: c.teamKey,
+              mapName: map.mapName,
+              matchDate: entry.matchDate,
+              teams: entry.teams,
+              tournament: entry.tournamentName,
+              won: true,
+            };
+            clutches.push(clutchEntry);
+            const key = c.nickname.toLowerCase();
+            if (!playerAgg.has(key)) {
+              playerAgg.set(key, { nickname: c.nickname, won: 0, lost: 0, bySize: {} });
+            }
+            const agg = playerAgg.get(key);
+            agg.won++;
+            agg.bySize[c.size] = (agg.bySize[c.size] || 0) + 1;
+          }
+        });
+      });
+    });
+    // Also count clutch attempts (lost) from player stats
+    (matchHistory ?? []).forEach((entry) => {
+      if (entry.includedInStats === false || !entry.data) return;
+      (entry.data.players ?? []).forEach((p) => {
+        const key = p.nickname.toLowerCase();
+        if (!playerAgg.has(key)) return;
+        const agg = playerAgg.get(key);
+        const attempts = p.clutchAttempts ?? 0;
+        const won = p.clutchesWon ?? 0;
+        const lost = attempts - won;
+        agg.lost = Math.max(agg.lost, lost);
+      });
+    });
+    const playerSummary = [...playerAgg.values()].map((p) => ({
+      ...p,
+      total: p.won + p.lost,
+      winRate: p.won + p.lost > 0 ? Math.round((p.won / (p.won + p.lost)) * 100) : 0,
+    })).sort((a, b) => b.won - a.won || b.winRate - a.winRate);
+    return { clutches, playerSummary };
+  }, [matchHistory]);
+
+  // Opening duel tracker — extract first kills from timeline events
+  const openingData = useMemo(() => {
+    const openings = [];
+    const playerAgg = new Map();
+    (matchHistory ?? []).forEach((entry) => {
+      if (entry.includedInStats === false || !entry.data) return;
+      (entry.data.maps ?? []).forEach((map) => {
+        (map.rounds ?? []).forEach((round) => {
+          const timeline = round.timeline ?? [];
+          const firstKill = timeline.find((e) => e.meta?.openingKill === true);
+          if (firstKill && firstKill.meta) {
+            const m = firstKill.meta;
+            const openingEntry = {
+              killerNickname: m.killerNickname,
+              victimNickname: m.victimNickname,
+              killerTeamKey: m.killerTeamKey,
+              victimTeamKey: m.victimTeamKey,
+              mapName: map.mapName,
+              matchDate: entry.matchDate,
+              teams: entry.teams,
+              zone: m.zone,
+              site: m.site,
+              weapon: m.weaponLabel,
+              headshot: m.headshot,
+            };
+            openings.push(openingEntry);
+            const key = m.killerNickname.toLowerCase();
+            if (!playerAgg.has(key)) {
+              playerAgg.set(key, { nickname: m.killerNickname, kills: 0, byMap: {}, bySide: { CT: 0, T: 0 } });
+            }
+            const agg = playerAgg.get(key);
+            agg.kills++;
+            agg.byMap[map.mapName] = (agg.byMap[map.mapName] || 0) + 1;
+          }
+        });
+      });
+    });
+    const playerSummary = [...playerAgg.values()].map((p => ({
+      ...p,
+      bestMap: Object.entries(p.byMap).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—",
+      bestMapKills: Object.entries(p.byMap).sort((a, b) => b[1] - a[1])[0]?.[1] ?? 0,
+    }))).sort((a, b) => b.kills - a.kills);
+    return { openings, playerSummary };
+  }, [matchHistory]);
+
+  const clutchesColumns = [
+    { key: "nickname", label: "Player" },
+    { key: "won", label: "Won", align: "right" },
+    { key: "lost", label: "Lost", align: "right" },
+    { key: "total", label: "Total", align: "right" },
+    { key: "winRate", label: "Win%", align: "right" },
+    { key: "bySize", label: "By Size", align: "right", render: (row) => {
+      const sizes = Object.entries(row.bySize).sort((a, b) => parseInt(a[0]) - parseInt(b[0]));
+      return sizes.map(([size, count]) => `1v${size}:${count}`).join("  ");
+    }},
+  ];
+
+  const openingsColumns = [
+    { key: "nickname", label: "Player" },
+    { key: "kills", label: "Opening Kills", align: "right" },
+    { key: "bestMap", label: "Best Map", align: "right", render: (row) => `${row.bestMap} (${row.bestMapKills})` },
+  ];
+
   const rowsByTab = {
     players: stats.players,
     teams: stats.teams,
     maps: stats.maps,
     tournaments: stats.tournaments,
+    clutches: clutchData.playerSummary,
+    openings: openingData.playerSummary,
   };
 
   const columnsByTab = {
@@ -7518,6 +7639,8 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
     teams: teamsColumns,
     maps: mapsColumns,
     tournaments: tournamentsColumns,
+    clutches: clutchesColumns,
+    openings: openingsColumns,
   };
 
   return (
@@ -7556,7 +7679,7 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
         <StatsDataTable
           columns={columnsByTab[tab]}
           rows={rowsByTab[tab]}
-          rowKey={tab === "players" ? "key" : tab === "maps" ? "mapName" : "name"}
+          rowKey={tab === "players" ? "key" : tab === "maps" ? "mapName" : tab === "clutches" || tab === "openings" ? "nickname" : "name"}
           onRowClick={tab === "players" && onSelectPlayer ? (row) => onSelectPlayer(row.key) : undefined}
         />
       </Panel>
