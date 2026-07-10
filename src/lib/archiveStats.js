@@ -318,8 +318,15 @@ export function aggregatePlayerStats(entries) {
           key,
           nickname: nick,
           role: player.role,
+          // Raw attributes from the player object (for sorting/filtering)
+          aim: player.aim ?? 0,
+          gameSense: player.gameSense ?? 0,
+          clutch: player.clutch ?? 0,
+          utility: player.utility ?? 0,
+          entry: player.entry ?? 0,
+          consistency: player.consistency ?? 0,
           teams: new Set(),
-          teamHistory: new Map(), // teamTag -> per-team aggregate
+          teamHistory: new Map(),
           seriesPlayed: 0,
           kills: 0,
           deaths: 0,
@@ -342,6 +349,13 @@ export function aggregatePlayerStats(entries) {
       const aggregate = players.get(key);
       aggregate.seriesPlayed += 1;
       aggregate.role = player.role;
+      // Update raw attributes (latest values win)
+      aggregate.aim = player.aim ?? aggregate.aim;
+      aggregate.gameSense = player.gameSense ?? aggregate.gameSense;
+      aggregate.clutch = player.clutch ?? aggregate.clutch;
+      aggregate.utility = player.utility ?? aggregate.utility;
+      aggregate.entry = player.entry ?? aggregate.entry;
+      aggregate.consistency = player.consistency ?? aggregate.consistency;
       const teamTag = safeString(player.teamTag ?? player.teamName, "");
       aggregate.teams.add(teamTag);
 
