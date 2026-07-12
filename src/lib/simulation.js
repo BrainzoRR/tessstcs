@@ -4350,6 +4350,15 @@ export function buildResultsData(matchInput) {
         teamTag: team.tag,
         nickname: player.nickname,
         role: player.role,
+        // Raw attributes — included so Stats can sort/filter by aim, gameSense,
+        // clutch, utility, entry, consistency. Without these the Top Players
+        // and role-filter tables show zeros for all attribute columns.
+        aim: player.aim ?? 0,
+        gameSense: player.gameSense ?? 0,
+        clutch: player.clutch ?? 0,
+        utility: player.utility ?? 0,
+        entry: player.entry ?? 0,
+        consistency: player.consistency ?? 0,
         kills: 0,
         deaths: 0,
         assists: 0,
