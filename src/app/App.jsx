@@ -2046,6 +2046,7 @@ function App() {
                 stats={statsViewModel}
                 onSelectPlayer={setSelectedPlayerKey}
                 matchHistory={state.matchHistory}
+                teams={state.teams}
               />
             )}
           </div>
@@ -7450,12 +7451,15 @@ function StatsDataTable({ columns, rows, rowKey, onRowClick, sortBy, sortDir, on
   );
 }
 
-function StatsView({ filters, onFiltersChange, options, overview, stats, mobile = false, onSelectPlayer, matchHistory = [] }) {
+function StatsView({ filters, onFiltersChange, options, overview, stats, mobile = false, onSelectPlayer, matchHistory = [], teams = [] }) {
   const [tab, setTab] = useState("players");
   const [compareOpen, setCompareOpen] = useState(false);
   const [roleFilter, setRoleFilter] = useState("all");
   const [sortBy, setSortBy] = useState("rating");
   const [sortDir, setSortDir] = useState("desc");
+  const [ratingRoleFilter, setRatingRoleFilter] = useState("all");
+  const [ratingSortBy, setRatingSortBy] = useState("composite");
+  const [ratingSortDir, setRatingSortDir] = useState("desc");
   const setFilter = (key, value) => onFiltersChange((current) => ({ ...current, [key]: value }));
   const tabs = [
     { id: "players", label: "Players" },
@@ -7477,12 +7481,6 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
     { key: "kastPercent", label: "KAST%", align: "right", sortable: true, render: (row) => `${row.kastPercent}%` },
     { key: "hsPercent", label: "HS%", align: "right", sortable: true, render: (row) => `${row.hsPercent}%` },
     { key: "impact", label: "Impact", align: "right", sortable: true, render: (row) => row.impact?.toFixed(2) },
-    { key: "aim", label: "Aim", align: "right", sortable: true },
-    { key: "gameSense", label: "Sense", align: "right", sortable: true },
-    { key: "clutch", label: "Clutch", align: "right", sortable: true },
-    { key: "utility", label: "Util", align: "right", sortable: true },
-    { key: "entry", label: "Entry", align: "right", sortable: true },
-    { key: "consistency", label: "Cons", align: "right", sortable: true },
   ];
 
   const roleOptions = ["all", "AWPer", "Entry Fragger", "Lurker", "Support", "IGL"];
@@ -7508,12 +7506,85 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
     return players;
   }, [stats.players, roleFilter, sortBy, sortDir]);
 
-  // Top 5 players by rating (for Top Players panel)
+  // Top 5 players by rating (for Top Players panel — match performance)
   const topPlayers = useMemo(() => {
     return [...(stats.players ?? [])]
       .sort((a, b) => b.rating - a.rating)
       .slice(0, 5);
   }, [stats.players]);
+
+  // Player Ratings — built from team rosters (NOT match history), so every
+  // player shows up even with 0 matches played. Uses compositeRating from
+  // simulation.js (same formula as team strength).
+  const allPlayers = useMemo(() => {
+    const seen = new Map();
+    teams.forEach((team) => {
+      (team.players ?? []).forEach((p) => {
+        const key = p.nickname.toLowerCase();
+        if (!seen.has(key)) {
+          seen.set(key, {
+            ...p,
+            teamName: team.name,
+            teamTag: team.tag,
+            teamLogo: team.logo,
+            composite: Math.round(
+              (p.aim ?? 0) * 0.25 + (p.gameSense ?? 0) * 0.22 + (p.clutch ?? 0) * 0.15 +
+              (p.utility ?? 0) * 0.13 + (p.entry ?? 0) * 0.15 + (p.consistency ?? 0) * 0.1
+            ),
+          });
+        }
+      });
+    });
+    return [...seen.values()];
+  }, [teams]);
+
+  const ratingRoleOptions = ["all", "AWPer", "Entry Fragger", "Lurker", "Support", "IGL"];
+  const ratingColumns = [
+    { key: "nickname", label: "Player", sortable: true },
+    { key: "role", label: "Role", sortable: true },
+    { key: "teamTag", label: "Team", sortable: true },
+    { key: "composite", label: "OVR", align: "right", sortable: true, render: (row) => <span className="font-bold" style={{ color: getRatingColor(row.composite / 100) }}>{row.composite}</span> },
+    { key: "aim", label: "Aim", align: "right", sortable: true },
+    { key: "gameSense", label: "Sense", align: "right", sortable: true },
+    { key: "clutch", label: "Clutch", align: "right", sortable: true },
+    { key: "utility", label: "Utility", align: "right", sortable: true },
+    { key: "entry", label: "Entry", align: "right", sortable: true },
+    { key: "consistency", label: "Cons", align: "right", sortable: true },
+  ];
+
+  const filteredRatedPlayers = useMemo(() => {
+    let players = [...allPlayers];
+    if (ratingRoleFilter !== "all") {
+      players = players.filter((p) => p.role === ratingRoleFilter);
+    }
+    players.sort((a, b) => {
+      let aVal = a[ratingSortBy];
+      let bVal = b[ratingSortBy];
+      if (typeof aVal === "string") {
+        aVal = aVal.toLowerCase();
+        bVal = (bVal ?? "").toLowerCase();
+      }
+      aVal = aVal ?? 0;
+      bVal = bVal ?? 0;
+      if (ratingSortDir === "desc") return bVal > aVal ? 1 : bVal < aVal ? -1 : 0;
+      return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+    });
+    return players;
+  }, [allPlayers, ratingRoleFilter, ratingSortBy, ratingSortDir]);
+
+  const handleRatingSort = (key) => {
+    if (ratingSortBy === key) {
+      setRatingSortDir(ratingSortDir === "desc" ? "asc" : "desc");
+    } else {
+      setRatingSortBy(key);
+      setRatingSortDir("desc");
+    }
+  };
+
+  // Top 5 by composite rating
+  const topRatedPlayers = useMemo(() => {
+    return [...allPlayers].sort((a, b) => b.composite - a.composite).slice(0, 5);
+  }, [allPlayers]);
 
   const handleSort = (key) => {
     if (sortBy === key) {
@@ -7713,9 +7784,65 @@ function StatsView({ filters, onFiltersChange, options, overview, stats, mobile 
           <ArchiveFilters filters={filters} onChange={setFilter} options={options} mobile={mobile} />
         </div>
       </Panel>
-      {/* Top Players */}
+      {/* Player Ratings — from team rosters, not match history */}
+      {allPlayers.length > 0 && (
+        <Panel title="Player Ratings" subtitle="Overall ratings from team rosters — all players, even with 0 matches played.">
+          {/* Top 5 by OVR */}
+          {topRatedPlayers.length > 0 && (
+            <div className={classNames("mb-4 grid gap-3", mobile ? "grid-cols-1" : "grid-cols-5")}>
+              {topRatedPlayers.map((p, i) => (
+                <div
+                  key={p.id ?? p.nickname}
+                  className={classNames(
+                    "rounded-2xl border p-4 text-center",
+                    i === 0 ? "border-amber-500/40 bg-amber-500/5" : "border-border bg-card/60"
+                  )}
+                >
+                  <div className="text-xs uppercase tracking-wide text-muted">#{i + 1}</div>
+                  <div className="mt-1 font-display text-xl text-text">{p.nickname}</div>
+                  <div className="text-xs text-muted">{p.teamTag} · {p.role}</div>
+                  <div className="numbers mt-2 text-3xl font-bold" style={{ color: getRatingColor(p.composite / 100) }}>
+                    {p.composite}
+                  </div>
+                  {i === 0 && <div className="mt-1 text-xs text-amber-300">👑 Top Rated</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Role filter for ratings */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-[0.16em] text-muted">Role:</span>
+            {ratingRoleOptions.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRatingRoleFilter(r)}
+                className={classNames(
+                  "rounded-lg border px-3 py-1.5 text-xs font-semibold",
+                  ratingRoleFilter === r ? "border-accent bg-accent/10 text-accent" : "border-border bg-card/60 text-muted hover:text-text"
+                )}
+              >
+                {r === "all" ? "All" : r}
+              </button>
+            ))}
+            <span className="ml-auto text-xs text-muted">
+              {filteredRatedPlayers.length} player(s) · sorted by <span className="text-accent">{ratingSortBy}</span> {ratingSortDir === "desc" ? "↓" : "↑"}
+            </span>
+          </div>
+          {/* Ratings table */}
+          <StatsDataTable
+            columns={ratingColumns}
+            rows={filteredRatedPlayers}
+            rowKey="nickname"
+            sortBy={ratingSortBy}
+            sortDir={ratingSortDir}
+            onSort={handleRatingSort}
+          />
+        </Panel>
+      )}
+      {/* Top Players — match performance */}
       {topPlayers.length > 0 && (
-        <Panel title="Top Players" subtitle="Best rated players across all filtered matches.">
+        <Panel title="Top Performers" subtitle="Best match rating across all filtered matches.">
           <div className={classNames("grid gap-3", mobile ? "grid-cols-1" : "grid-cols-5")}>
             {topPlayers.map((p, i) => (
               <div
