@@ -5577,11 +5577,9 @@ function StreamMatchView({
                   {latestRadarMarker?.clock ? `Last frag ${latestRadarMarker.clock}` : "Awaiting first frag"}
                 </div>
               </div>
-              {/* Radar container — uses aspect-ratio + max dimensions so it
-                  scales to available space regardless of screen resolution.
-                  On a laptop (smaller height) the radar shrinks proportionally;
-                  on a big monitor it grows. */}
-              <div className="relative flex min-h-0 flex-1 items-center justify-center">
+              {/* Radar container — min-h-0 so it shrinks in flex/grid,
+                  h-full so RadarPanel gets actual pixel height. */}
+              <div className="min-h-0 h-full">
                 <RadarPanel
                   mapName={activeMap.mapName}
                   markers={radarMarkers}
