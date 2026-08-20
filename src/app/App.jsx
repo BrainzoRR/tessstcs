@@ -5494,13 +5494,15 @@ function StreamMatchView({
   const captainAId = useMemo(() => teamAState?.players?.find((p) => p.isCaptain)?.id ?? null, [teamAState]);
   const captainBId = useMemo(() => teamBState?.players?.find((p) => p.isCaptain)?.id ?? null, [teamBState]);
 
-  const latestKills = killFeedEntries.slice(0, 3);
+  // Kill feed: show all entries from current round (not just 3).
+  // They scroll horizontally and animate in.
+  const roundKillFeed = killFeedEntries;
 
   return (
     <div
       className={classNames(
         "grid min-h-0 overflow-hidden",
-        fullscreen ? "h-[100dvh] gap-1 px-1 py-1" : "h-[calc(100vh-102px)] gap-2"
+        fullscreen ? "h-[100dvh] gap-1 px-1 py-1" : "h-[calc(100vh-100px)] gap-1.5 sm:gap-2"
       )}
       style={{
         gridTemplateRows: "auto minmax(0,1fr) auto",
@@ -5530,7 +5532,8 @@ function StreamMatchView({
       <div
         className={classNames(
           "grid min-h-0 overflow-hidden",
-          fullscreen ? "grid-cols-[120px_minmax(0,1fr)_120px] gap-1" : "grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)] gap-2 xl:grid-cols-[minmax(240px,280px)_minmax(0,1fr)_minmax(240px,280px)]"
+          fullscreen ? "grid-cols-[100px_minmax(0,1fr)_100px] gap-1"
+            : "grid-cols-[minmax(160px,220px)_minmax(0,1fr)_minmax(160px,220px)] gap-1.5 sm:grid-cols-[minmax(180px,240px)_minmax(0,1fr)_minmax(180px,240px)] sm:gap-2 xl:grid-cols-[minmax(200px,260px)_minmax(0,1fr)_minmax(200px,260px)]"
         )}
       >
         <StreamTeamColumn
@@ -5565,7 +5568,7 @@ function StreamMatchView({
           </div>
 
           <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden">
-            <div className={classNames("panel min-h-0 overflow-hidden", fullscreen ? "rounded-none border-x-0 p-1.5" : "rounded-2xl p-2.5")}>
+            <div className={classNames("panel min-h-0 overflow-hidden flex flex-col", fullscreen ? "rounded-none border-x-0 p-1.5" : "rounded-2xl p-2.5")}>
               <div className="mb-1 flex items-center justify-between px-1">
                 <div className="font-display text-xs uppercase tracking-[0.2em] text-muted">
                   Radar · {activeMap.mapName}
@@ -5574,7 +5577,11 @@ function StreamMatchView({
                   {latestRadarMarker?.clock ? `Last frag ${latestRadarMarker.clock}` : "Awaiting first frag"}
                 </div>
               </div>
-              <div className="h-[calc(100%-22px)] min-h-0">
+              {/* Radar container — uses aspect-ratio + max dimensions so it
+                  scales to available space regardless of screen resolution.
+                  On a laptop (smaller height) the radar shrinks proportionally;
+                  on a big monitor it grows. */}
+              <div className="relative flex min-h-0 flex-1 items-center justify-center">
                 <RadarPanel
                   mapName={activeMap.mapName}
                   markers={radarMarkers}
@@ -5587,30 +5594,36 @@ function StreamMatchView({
               </div>
             </div>
 
-            {/* Compact kill feed strip — latest 3 */}
+            {/* Kill feed strip — full width, all kills, animated */}
             <div className={classNames("panel overflow-hidden", fullscreen ? "rounded-none border-x-0 px-2 py-1" : "rounded-2xl px-2.5 py-1.5")}>
-              <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin">
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin" style={{ scrollbarWidth: "thin" }}>
                 <div className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">Feed</div>
-                {latestKills.length === 0 ? (
+                {roundKillFeed.length === 0 ? (
                   <div className="text-[11px] text-muted">No frags yet this round.</div>
                 ) : (
-                  latestKills.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className={classNames(
-                        "flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1",
-                        entry.victimSide === "CT" ? "border-sky-500/25 bg-sky-500/10" : "border-accent/25 bg-accent/10"
-                      )}
-                    >
-                      <span className="numbers text-[10px] text-text">{entry.clock}</span>
-                      <span className="text-[11px] text-text">{entry.killerNickname ?? "—"}</span>
-                      <span className={classNames("rounded px-1 py-0.5 text-[9px] uppercase tracking-[0.16em]", entry.victimSide === "CT" ? "bg-sky-500/20 text-sky-300" : "bg-accent/20 text-accent")}>
-                        {entry.weaponLabel ?? "UTIL"}
-                      </span>
-                      <span className="text-[10px] text-muted">vs</span>
-                      <span className="text-[11px] text-text">{entry.victimNickname ?? "—"}</span>
-                    </div>
-                  ))
+                  roundKillFeed.map((entry, idx) => {
+                    const isLatest = idx === roundKillFeed.length - 1;
+                    return (
+                      <div
+                        key={entry.id}
+                        className={classNames(
+                          "stream-killfeed-item flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1",
+                          entry.victimSide === "CT" ? "border-sky-500/25 bg-sky-500/10" : "border-accent/25 bg-accent/10",
+                          isLatest && "stream-killfeed-latest"
+                        )}
+                        style={{ animationDelay: `${idx * 50}ms` }}
+                      >
+                        <span className="numbers text-[10px] text-text">{entry.clock}</span>
+                        <span className="text-[11px] text-text">{entry.killerNickname ?? "—"}</span>
+                        <span className={classNames("rounded px-1 py-0.5 text-[9px] uppercase tracking-[0.16em]", entry.victimSide === "CT" ? "bg-sky-500/20 text-sky-300" : "bg-accent/20 text-accent")}>
+                          {entry.weaponLabel ?? "UTIL"}
+                        </span>
+                        <span className="text-[10px] text-muted">→</span>
+                        <span className="text-[11px] text-text">{entry.victimNickname ?? "—"}</span>
+                        {entry.headshot && <span className="text-[9px] text-red-400">HS</span>}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
