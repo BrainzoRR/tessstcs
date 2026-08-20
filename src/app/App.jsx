@@ -5532,8 +5532,8 @@ function StreamMatchView({
       <div
         className={classNames(
           "grid min-h-0 overflow-hidden",
-          fullscreen ? "grid-cols-[100px_minmax(0,1fr)_100px] gap-1"
-            : "grid-cols-[minmax(160px,220px)_minmax(0,1fr)_minmax(160px,220px)] gap-1.5 sm:grid-cols-[minmax(180px,240px)_minmax(0,1fr)_minmax(180px,240px)] sm:gap-2 xl:grid-cols-[minmax(200px,260px)_minmax(0,1fr)_minmax(200px,260px)]"
+          fullscreen ? "grid-cols-[140px_minmax(0,1fr)_140px] gap-1"
+            : "grid-cols-[minmax(220px,300px)_minmax(0,1fr)_minmax(220px,300px)] gap-1.5 sm:gap-2"
         )}
       >
         <StreamTeamColumn
@@ -5828,17 +5828,20 @@ function StreamPlayerRow({ player, side, isCaptain = false, reverse = false, ful
         </span>
       </div>
 
-      {/* Row 2: role + K/D + money + armor */}
+      {/* Row 2: role + K/D/A + ADR + money + armor */}
       <div className={classNames("mt-1 flex items-center justify-between gap-1.5 text-[10px]", reverse && "flex-row-reverse text-right")}>
         <div className="flex items-center gap-1.5 text-muted">
           <span className="rounded border border-border bg-surface/60 px-1 py-0.5 uppercase tracking-[0.12em] text-text">
             {shortRoleLabel(player.role)}
           </span>
-          <span className="numbers text-text">
-            {player.kills ?? 0}/{player.deaths ?? 0}
+          <span className="numbers text-text" title="Kills / Deaths / Assists">
+            {player.kills ?? 0}/{player.deaths ?? 0}/{player.assists ?? 0}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          <span className="numbers text-muted" title="ADR">
+            {(player.adr ?? 0).toFixed(0)} ADR
+          </span>
           {armorLabel && (
             <span
               title="Armor"
@@ -5847,7 +5850,7 @@ function StreamPlayerRow({ player, side, isCaptain = false, reverse = false, ful
               <Shield size={9} /> {armorLabel}
             </span>
           )}
-          <span className={classNames("numbers", moneyTone)}>${player.money ?? 0}</span>
+          <span className={classNames("numbers font-semibold", moneyTone)}>${player.money ?? 0}</span>
         </div>
       </div>
 
