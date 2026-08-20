@@ -645,3 +645,76 @@ Stage Summary:
 - Side Swap Effect: таблица показывает recommended side per map.
 - Compare Players: модалка сравнения 2 игроков по 12 статам + team history.
 - Архив: deploy-export/cs2-vercel-deploy.zip (680KB).
+
+---
+Task ID: stream-match-view-mode
+Agent: Z.ai Code (main)
+Task: Создать новый режим просмотра матча "Stream" — имитация CS2 broadcast overlay: top bar с командами/счётом/alive, левая/правая панели игроков, центр с радаром, нижний бар с таймером/типом раунда/экономикой.
+
+Work Log:
+- Добавил "stream" в VALID_LIVE_LAYOUT_MODES (App.jsx:813) — теперь режим валиден и сохраняется в localStorage snapshot.
+- Добавил кнопку "Stream" в LayoutModeSwitch (desktop-список режимов): Broadcast | Overlay | Coach | Stream | Phone.
+- Создал 4 новых компонента в App.jsx (после OverlayLiveMatchView, перед CoachRosterColumn):
+
+  1. StreamMatchView (5443) — главный контейнер:
+     - grid-rows-[auto_minmax(0,1fr)_auto] — top bar / middle / bottom bar
+     - Высота h-[calc(100vh-102px)] — fits на ОДИН экран без скролла (desktop)
+     - При fullscreen (phone-live) — h-[100dvh] с компактными padding'ами
+     - Middle: 3-col grid [220-260px | 1fr | 220-260px] (xl: 240-280px)
+     - Принимает все стандартные props (match, activeMap, latestRound, players, states, radar markers, killFeed, layout switches)
+     - Считает series score (match.seriesScore), alive count, bank totals, round type, bomb status
+     - Captain lookup через teamAState.players.find(p => p.isCaptain)
+
+  2. StreamTopBar (5660):
+     - 3-сегментный bar (glass): Team A logo+tag+side badge+series score+alive | center map/clock/round | Team B
+     - Team A: accent color (T side), Team B: ct color
+     - Center: mapName (accent), R{idx}/24 (or OTn), clock (red if ≤10s), live status label
+     - Alive count: зелёный если ≥3, amber если 1-2, red если 0
+
+  3. StreamTeamColumn (5751):
+     - Compact header: tag + side label + score + total bank (formatMoney)
+     - 5 player rows в grid-rows-5 (равные доли высоты)
+     - tone = sideToneClasses(side) — CT=sky, T=accent
+
+  4. StreamPlayerRow (5783):
+     - 3 строки на игрока:
+       Row 1: captain Target icon + nickname (font-display) | weapon badge (weaponBadgeClasses → accent/teal/emerald/white по типу)
+       Row 2: role badge (shortRoleLabel) + K/D | armor indicator (Shield icon + "K"/"K+H") | money ($N, green>2000 / amber 1000-2000 / red<1000)
+       Row 3: HP bar (tone.bar) + HP number, ИЛИ "Eliminated" badge (red) если мёртв
+     - Dead players: opacity-70, border-border вместо tone.border
+     - reverse=true для Team B — зеркальное отображение
+
+  5. StreamBottomBar (5865):
+     - 6-segment grid (grid-cols-2 sm:3 lg:6):
+       Round Call (strategy) | TeamA Buy (round type) | TeamB Buy | TeamA Bank | TeamB Bank | Bomb
+     - Bomb segment подсвечивается danger если planted
+     - Bank tone: green>20000 / amber 10000-20000 / red<10000
+
+  В центре StreamMatchView:
+  - Контроль-бар: SiteModeSwitch + LayoutModeSwitch (compact) | PresentationMode + PlaybackSpeed + SoundDesign + Expand button
+  - RadarPanel (compact, showSidebar=false, showSummary=false) — переиспользует существующий компонент с death markers
+  - Компактный kill feed strip: последние 3 килла горизонтально (killer → weapon badge → victim)
+
+- Интеграция в LiveMatchView (4725): if (layoutMode === "stream") return <StreamMatchView ... />
+  Расположен ПОСЛЕ overlay, ДО phone/mobileSite check'а — чтобы desktop users могли выбрать stream.
+
+- Использует существующие imports/utilities: classNames, renderLogo, formatMoney, sideToneClasses, shortRoleLabel, weaponBadgeClasses, roundTypeLabel, RadarPanel, RadarExpandedModal, LayoutModeSwitch, SiteModeSwitch, PresentationModeSwitch, PlaybackSpeedSwitch, SoundDesignSwitch. Target/Shield icons из lucide-react (уже импортированы).
+
+- CSS: использует .panel, .numbers, .glass, .scrollbar-thin + Tailwind utility classes (bg-card, border-border, text-text, text-muted, text-accent, text-ct, text-danger, bg-accent/10, border-accent/40, bg-surface, bg-sky-500/10, bg-accent/10, text-emerald-300, text-red-400, text-sky-300).
+
+- Responsive: tailwind breakpoints sm:/lg:/xl: — на узких desktop-окнах всё сжимается gracefully, не ломается. На mobile site (siteMode=mobile) используется PhoneLandscapeLiveMatchView (broadcast/coach), не stream — как и было раньше.
+
+Проверка:
+- bun run lint: 0 errors, 1 pre-existing warning (не мой — строка 1529 unused eslint-disable).
+- bun run build (с DATABASE_URL): ✓ Compiled successfully in 10.6s, 3 static pages, 4 API routes.
+- Структура файла не сломана — CoachRosterColumn и все остальные компоненты на месте.
+
+Stage Summary:
+- Новый режим просмотра матча "Stream" добавлен в LayoutModeSwitch (desktop).
+- StreamMatchView: top bar (teams + score + series + alive + round + clock) / 3-col middle (player panels + radar + kill feed strip) / bottom bar (round type + economy + bomb status).
+- Все данные берутся из существующего match state (match.seriesScore, activeMap.score/roundNumber/overtimeNumber, latestRound.roundType/bombPlanted/plantSite, teamAState.players for captain lookup).
+- Fits на один экран без скролла на desktop (h-[calc(100vh-102px)]).
+- 5 player rows на команду: nickname + captain badge + weapon + role + K/D + money + armor + HP bar / Eliminated tag.
+- Captain detection через teamState.players.isCaptain (не только IGL — любой роли).
+- Build проходит, lint чистый.
+

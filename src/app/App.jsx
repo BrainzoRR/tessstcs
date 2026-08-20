@@ -810,7 +810,7 @@ function defaultSetup(teams) {
 
 const SNAPSHOT_VERSION = 3;
 const VALID_SITE_MODES = new Set([null, "desktop", "mobile"]);
-const VALID_LIVE_LAYOUT_MODES = new Set(["broadcast", "overlay", "coach", "phone"]);
+const VALID_LIVE_LAYOUT_MODES = new Set(["broadcast", "overlay", "coach", "phone", "stream"]);
 const VALID_PRESENTATION_MODES = new Set(["semi", "live"]);
 
 function sanitizeMatchHistory(entries) {
@@ -4722,6 +4722,40 @@ function LiveMatchView({
     );
   }
 
+  if (layoutMode === "stream") {
+    return (
+      <StreamMatchView
+        match={match}
+        activeMap={activeMap}
+        latestRound={latestRound}
+        teamAPlayers={teamAPlayers}
+        teamBPlayers={teamBPlayers}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        roundClock={roundClock}
+        roundProgress={roundProgress}
+        roundClockLabel={roundClockLabel}
+        layoutMode={layoutMode}
+        onLayoutModeChange={onLayoutModeChange}
+        presentationMode={presentationMode}
+        onPresentationModeChange={onPresentationModeChange}
+        currentPlaybackEvent={currentPlaybackEvent}
+        killFeedEntries={killFeedEntries}
+        liveStatusLabel={liveStatusLabel}
+        playbackStepLabel={playbackStepLabel}
+        playbackRate={playbackRate}
+        onPlaybackRateChange={onPlaybackRateChange}
+        soundDesignEnabled={soundDesignEnabled}
+        onSoundDesignChange={onSoundDesignChange}
+        siteMode={siteMode}
+        onSiteModeChange={onSiteModeChange}
+        radarMarkers={radarMarkers}
+        latestRadarMarker={latestRadarMarker}
+        fullscreen={fullscreen}
+      />
+    );
+  }
+
   if (mobileSite || layoutMode === "phone") {
     return (
       <PhoneLandscapeLiveMatchView
@@ -5406,6 +5440,503 @@ function OverlayLiveMatchView({
   );
 }
 
+function StreamMatchView({
+  match,
+  activeMap,
+  latestRound,
+  teamAPlayers,
+  teamBPlayers,
+  teamAState,
+  teamBState,
+  roundClock,
+  roundProgress,
+  roundClockLabel,
+  layoutMode,
+  onLayoutModeChange,
+  presentationMode = "semi",
+  onPresentationModeChange,
+  currentPlaybackEvent = null,
+  killFeedEntries = [],
+  liveStatusLabel = null,
+  playbackStepLabel = null,
+  playbackRate = 1.25,
+  onPlaybackRateChange,
+  soundDesignEnabled = false,
+  onSoundDesignChange,
+  siteMode = "desktop",
+  onSiteModeChange,
+  radarMarkers = [],
+  latestRadarMarker = null,
+  fullscreen = false,
+}) {
+  const [radarExpanded, setRadarExpanded] = useState(false);
+
+  const seriesA = match.seriesScore?.teamA ?? 0;
+  const seriesB = match.seriesScore?.teamB ?? 0;
+  const teamAAlive = teamAPlayers.filter((p) => p.alive).length;
+  const teamBAlive = teamBPlayers.filter((p) => p.alive).length;
+
+  const roundIdx = activeMap.roundNumber ?? 1;
+  const overtimeNumber = activeMap.overtimeNumber ?? 0;
+  const isOT = overtimeNumber > 0;
+  const REG_ROUNDS = 24; // MR12 → 12 rounds per side, 24 in regulation
+  const roundTotalLabel = isOT ? `OT${overtimeNumber}` : `${REG_ROUNDS}`;
+
+  const teamABank = teamAPlayers.reduce((sum, p) => sum + (p.money ?? 0), 0);
+  const teamBBank = teamBPlayers.reduce((sum, p) => sum + (p.money ?? 0), 0);
+
+  const roundTypeA = latestRound?.roundType?.teamA;
+  const roundTypeB = latestRound?.roundType?.teamB;
+  const bombPlanted = Boolean(latestRound?.bombPlanted);
+  const bombSite = latestRound?.plantSite ?? null;
+  const strategyLabel = latestRound?.strategy ?? (currentPlaybackEvent?.label ?? "Freeze time");
+
+  const captainAId = useMemo(() => teamAState?.players?.find((p) => p.isCaptain)?.id ?? null, [teamAState]);
+  const captainBId = useMemo(() => teamBState?.players?.find((p) => p.isCaptain)?.id ?? null, [teamBState]);
+
+  const latestKills = killFeedEntries.slice(0, 3);
+
+  return (
+    <div
+      className={classNames(
+        "grid min-h-0 overflow-hidden",
+        fullscreen ? "h-[100dvh] gap-1 px-1 py-1" : "h-[calc(100vh-102px)] gap-2"
+      )}
+      style={{
+        gridTemplateRows: "auto minmax(0,1fr) auto",
+      }}
+    >
+      {/* ---- TOP BAR ---- */}
+      <StreamTopBar
+        match={match}
+        activeMap={activeMap}
+        latestRound={latestRound}
+        liveStatusLabel={liveStatusLabel}
+        playbackStepLabel={playbackStepLabel}
+        roundClockLabel={roundClockLabel}
+        roundClock={roundClock}
+        seriesA={seriesA}
+        seriesB={seriesB}
+        teamAAlive={teamAAlive}
+        teamBAlive={teamBAlive}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        roundIdx={roundIdx}
+        roundTotalLabel={roundTotalLabel}
+        isOT={isOT}
+      />
+
+      {/* ---- MIDDLE: 3 columns ---- */}
+      <div
+        className={classNames(
+          "grid min-h-0 overflow-hidden",
+          fullscreen ? "grid-cols-[120px_minmax(0,1fr)_120px] gap-1" : "grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)] gap-2 xl:grid-cols-[minmax(240px,280px)_minmax(0,1fr)_minmax(240px,280px)]"
+        )}
+      >
+        <StreamTeamColumn
+          team={match.teamA}
+          players={teamAPlayers}
+          side={teamAState.side}
+          captainId={captainAId}
+          score={activeMap.score.teamA}
+          fullscreen={fullscreen}
+        />
+
+        {/* Center: control bar + radar + kill feed strip */}
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2 overflow-hidden">
+          <div className={classNames("panel flex flex-wrap items-center justify-between gap-2", fullscreen ? "rounded-none border-x-0 px-2 py-1" : "rounded-2xl px-3 py-2")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
+              <LayoutModeSwitch layoutMode={layoutMode} onChange={onLayoutModeChange} compact />
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <PresentationModeSwitch mode={presentationMode} onChange={onPresentationModeChange} />
+              <PlaybackSpeedSwitch value={playbackRate} onChange={onPlaybackRateChange} compact />
+              <SoundDesignSwitch enabled={soundDesignEnabled} onToggle={onSoundDesignChange} />
+              <button
+                type="button"
+                onClick={() => setRadarExpanded(true)}
+                className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.16em] text-accent transition hover:border-accent hover:bg-accent/15"
+                aria-label="Open radar in expanded view"
+              >
+                Expand
+              </button>
+            </div>
+          </div>
+
+          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden">
+            <div className={classNames("panel min-h-0 overflow-hidden", fullscreen ? "rounded-none border-x-0 p-1.5" : "rounded-2xl p-2.5")}>
+              <div className="mb-1 flex items-center justify-between px-1">
+                <div className="font-display text-xs uppercase tracking-[0.2em] text-muted">
+                  Radar · {activeMap.mapName}
+                </div>
+                <div className="numbers text-[11px] text-accent">
+                  {latestRadarMarker?.clock ? `Last frag ${latestRadarMarker.clock}` : "Awaiting first frag"}
+                </div>
+              </div>
+              <div className="h-[calc(100%-22px)] min-h-0">
+                <RadarPanel
+                  mapName={activeMap.mapName}
+                  markers={radarMarkers}
+                  latestMarker={latestRadarMarker}
+                  sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+                  compact
+                  showSidebar={false}
+                  showSummary={false}
+                />
+              </div>
+            </div>
+
+            {/* Compact kill feed strip — latest 3 */}
+            <div className={classNames("panel overflow-hidden", fullscreen ? "rounded-none border-x-0 px-2 py-1" : "rounded-2xl px-2.5 py-1.5")}>
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin">
+                <div className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">Feed</div>
+                {latestKills.length === 0 ? (
+                  <div className="text-[11px] text-muted">No frags yet this round.</div>
+                ) : (
+                  latestKills.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={classNames(
+                        "flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1",
+                        entry.victimSide === "CT" ? "border-sky-500/25 bg-sky-500/10" : "border-accent/25 bg-accent/10"
+                      )}
+                    >
+                      <span className="numbers text-[10px] text-text">{entry.clock}</span>
+                      <span className="text-[11px] text-text">{entry.killerNickname ?? "—"}</span>
+                      <span className={classNames("rounded px-1 py-0.5 text-[9px] uppercase tracking-[0.16em]", entry.victimSide === "CT" ? "bg-sky-500/20 text-sky-300" : "bg-accent/20 text-accent")}>
+                        {entry.weaponLabel ?? "UTIL"}
+                      </span>
+                      <span className="text-[10px] text-muted">vs</span>
+                      <span className="text-[11px] text-text">{entry.victimNickname ?? "—"}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <StreamTeamColumn
+          team={match.teamB}
+          players={teamBPlayers}
+          side={teamBState.side}
+          captainId={captainBId}
+          score={activeMap.score.teamB}
+          reverse
+          fullscreen={fullscreen}
+        />
+      </div>
+
+      {/* ---- BOTTOM BAR ---- */}
+      <StreamBottomBar
+        match={match}
+        latestRound={latestRound}
+        strategyLabel={strategyLabel}
+        roundTypeA={roundTypeA}
+        roundTypeB={roundTypeB}
+        teamABank={teamABank}
+        teamBBank={teamBBank}
+        bombPlanted={bombPlanted}
+        bombSite={bombSite}
+        teamAState={teamAState}
+        teamBState={teamBState}
+        fullscreen={fullscreen}
+      />
+
+      {radarExpanded && (
+        <RadarExpandedModal
+          mapName={activeMap.mapName}
+          markers={radarMarkers}
+          latestMarker={latestRadarMarker}
+          sideLookup={{ teamA: teamAState.side, teamB: teamBState.side }}
+          onClose={() => setRadarExpanded(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StreamTopBar({
+  match,
+  activeMap,
+  latestRound,
+  liveStatusLabel,
+  playbackStepLabel,
+  roundClockLabel,
+  roundClock,
+  seriesA,
+  seriesB,
+  teamAAlive,
+  teamBAlive,
+  teamAState,
+  teamBState,
+  roundIdx,
+  roundTotalLabel,
+  isOT,
+}) {
+  const toneA = sideToneClasses(teamAState.side);
+  const toneB = sideToneClasses(teamBState.side);
+
+  return (
+    <div className="panel glass flex items-stretch justify-between gap-3 overflow-hidden rounded-2xl px-3 py-2">
+      {/* Team A block */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface">
+          {renderLogo(match.teamA.logo, match.teamA.tag.slice(0, 1))}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="truncate font-display text-base text-text sm:text-lg">{match.teamA.tag}</div>
+            <span className={classNames("rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.18em]", toneA.border, toneA.bg, toneA.text)}>
+              {teamAState.side}
+            </span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-muted">
+            <span>Series <span className="numbers text-text">{seriesA}</span></span>
+            <span aria-hidden>·</span>
+            <span className={classNames("numbers", teamAAlive >= 3 ? "text-emerald-300" : teamAAlive > 0 ? "text-accent" : "text-danger")}>
+              {teamAAlive} alive
+            </span>
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="numbers text-3xl text-accent sm:text-4xl">{activeMap.score.teamA}</div>
+        </div>
+      </div>
+
+      {/* Center meta */}
+      <div className="flex min-w-[160px] flex-col items-center justify-center gap-0.5 border-x border-border px-3 text-center">
+        <div className="font-display text-base text-accent sm:text-lg">{activeMap.mapName}</div>
+        <div className="text-[10px] uppercase tracking-[0.18em] text-muted">
+          R<span className="numbers text-text">{roundIdx}</span>/{roundTotalLabel}
+          {isOT && <span className="ml-1 text-accent">OT</span>}
+        </div>
+        <div className={classNames("numbers text-xl sm:text-2xl", roundClock <= 10 ? "text-red-400" : "text-text")}>
+          {roundClockLabel}
+        </div>
+        <div className="hidden text-[10px] uppercase tracking-[0.16em] text-muted sm:block">
+          {liveStatusLabel ?? "Stream"}{playbackStepLabel ? ` · ${playbackStepLabel}` : ""}
+        </div>
+      </div>
+
+      {/* Team B block */}
+      <div className="flex min-w-0 flex-1 flex-row-reverse items-center gap-3 text-right">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface">
+          {renderLogo(match.teamB.logo, match.teamB.tag.slice(0, 1))}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-end gap-2">
+            <span className={classNames("rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.18em]", toneB.border, toneB.bg, toneB.text)}>
+              {teamBState.side}
+            </span>
+            <div className="truncate font-display text-base text-text sm:text-lg">{match.teamB.tag}</div>
+          </div>
+          <div className="mt-0.5 flex items-center justify-end gap-2 text-[10px] uppercase tracking-[0.18em] text-muted">
+            <span className={classNames("numbers", teamBAlive >= 3 ? "text-emerald-300" : teamBAlive > 0 ? "text-accent" : "text-danger")}>
+              {teamBAlive} alive
+            </span>
+            <span aria-hidden>·</span>
+            <span>Series <span className="numbers text-text">{seriesB}</span></span>
+          </div>
+        </div>
+        <div className="shrink-0 text-left">
+          <div className="numbers text-3xl text-ct sm:text-4xl">{activeMap.score.teamB}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StreamTeamColumn({ team, players, side, captainId, score, reverse = false, fullscreen = false }) {
+  const tone = sideToneClasses(side);
+  const totalMoney = players.reduce((sum, p) => sum + (p.money ?? 0), 0);
+
+  return (
+    <section className={classNames("panel min-h-0 overflow-hidden", fullscreen ? "rounded-none border-x-0 p-1.5" : "rounded-2xl p-2")}>
+      <div className={classNames("mb-2 flex items-center justify-between rounded-xl border px-2 py-1.5", tone.border, tone.bg, reverse && "flex-row-reverse text-right")}>
+        <div className="min-w-0">
+          <div className="truncate font-display text-sm text-text sm:text-base">{team.tag}</div>
+          <div className="text-[9px] uppercase tracking-[0.18em] text-muted">{side}-Side</div>
+        </div>
+        <div className={classNames("text-right", reverse && "text-left")}>
+          <div className="numbers text-xl text-text sm:text-2xl">{score}</div>
+          <div className="numbers text-[10px] text-muted">{formatMoney(totalMoney)}</div>
+        </div>
+      </div>
+      <div className={classNames("grid min-h-0 flex-1 gap-1.5", fullscreen ? "grid-rows-5" : "grid-rows-5")}>
+        {players.map((player) => (
+          <StreamPlayerRow
+            key={player.id}
+            player={player}
+            side={side}
+            isCaptain={player.id === captainId}
+            reverse={reverse}
+            fullscreen={fullscreen}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StreamPlayerRow({ player, side, isCaptain = false, reverse = false, fullscreen = false }) {
+  const tone = sideToneClasses(side);
+  const moneyTone =
+    player.money > 2000 ? "text-emerald-300" : player.money >= 1000 ? "text-accent" : "text-danger";
+  const armorLabel = player.armor ? (player.helmet ? "K+H" : "K") : null;
+  const dead = !player.alive;
+
+  return (
+    <div
+      className={classNames(
+        "flex min-h-0 flex-col justify-center rounded-xl border px-2 py-1.5",
+        dead ? "border-border bg-surface/50 opacity-70" : classNames(tone.border, "bg-card/80")
+      )}
+    >
+      {/* Row 1: nickname + weapon */}
+      <div className={classNames("flex items-center justify-between gap-1.5", reverse && "flex-row-reverse text-right")}>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {isCaptain && (
+            <span
+              title="Captain"
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-accent/40 bg-accent/10 text-accent"
+            >
+              <Target size={10} />
+            </span>
+          )}
+          <div className="truncate font-display text-xs text-text sm:text-sm">{player.nickname}</div>
+        </div>
+        <span
+          className={classNames(
+            "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em]",
+            weaponBadgeClasses(player.weaponType)
+          )}
+        >
+          {player.weaponLabel ?? "—"}
+        </span>
+      </div>
+
+      {/* Row 2: role + K/D + money + armor */}
+      <div className={classNames("mt-1 flex items-center justify-between gap-1.5 text-[10px]", reverse && "flex-row-reverse text-right")}>
+        <div className="flex items-center gap-1.5 text-muted">
+          <span className="rounded border border-border bg-surface/60 px-1 py-0.5 uppercase tracking-[0.12em] text-text">
+            {shortRoleLabel(player.role)}
+          </span>
+          <span className="numbers text-text">
+            {player.kills ?? 0}/{player.deaths ?? 0}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {armorLabel && (
+            <span
+              title="Armor"
+              className="flex items-center gap-0.5 rounded border border-border bg-surface/60 px-1 py-0.5 text-[9px] uppercase tracking-[0.12em] text-muted"
+            >
+              <Shield size={9} /> {armorLabel}
+            </span>
+          )}
+          <span className={classNames("numbers", moneyTone)}>${player.money ?? 0}</span>
+        </div>
+      </div>
+
+      {/* Row 3: HP bar */}
+      <div className="mt-1 flex items-center gap-1.5">
+        {dead ? (
+          <div className="flex-1 rounded border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-center text-[9px] uppercase tracking-[0.18em] text-danger">
+            Eliminated
+          </div>
+        ) : (
+          <>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface">
+              <div
+                className={classNames("h-full rounded-full transition-all", tone.bar)}
+                style={{ width: `${Math.max(2, (player.hp ?? 0))}%` }}
+              />
+            </div>
+            <span className="numbers w-7 shrink-0 text-right text-[10px] text-text">{player.hp ?? 0}</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StreamBottomBar({
+  match,
+  latestRound,
+  strategyLabel,
+  roundTypeA,
+  roundTypeB,
+  teamABank,
+  teamBBank,
+  bombPlanted,
+  bombSite,
+  teamAState,
+  teamBState,
+  fullscreen = false,
+}) {
+  const segments = [
+    {
+      key: "strategy",
+      label: "Round Call",
+      value: strategyLabel,
+      tone: "text-text",
+    },
+    {
+      key: "typeA",
+      label: `${match.teamA.tag} Buy`,
+      value: roundTypeLabel(roundTypeA).toUpperCase(),
+      tone: "text-accent",
+    },
+    {
+      key: "typeB",
+      label: `${match.teamB.tag} Buy`,
+      value: roundTypeLabel(roundTypeB).toUpperCase(),
+      tone: "text-ct",
+    },
+    {
+      key: "bankA",
+      label: `${match.teamA.tag} Bank`,
+      value: formatMoney(teamABank),
+      tone: teamABank > 20000 ? "text-emerald-300" : teamABank >= 10000 ? "text-accent" : "text-danger",
+    },
+    {
+      key: "bankB",
+      label: `${match.teamB.tag} Bank`,
+      value: formatMoney(teamBBank),
+      tone: teamBBank > 20000 ? "text-emerald-300" : teamBBank >= 10000 ? "text-accent" : "text-danger",
+    },
+    {
+      key: "bomb",
+      label: "Bomb",
+      value: bombPlanted ? `Planted ${bombSite ?? ""}`.trim() : "Not planted",
+      tone: bombPlanted ? "text-danger" : "text-muted",
+    },
+  ];
+
+  return (
+    <div className={classNames("panel glass overflow-hidden rounded-2xl", fullscreen ? "px-2 py-1" : "px-3 py-2")}>
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
+        {segments.map((seg) => (
+          <div
+            key={seg.key}
+            className={classNames(
+              "rounded-xl border border-border bg-surface/60 px-2 py-1.5",
+              seg.key === "bomb" && bombPlanted && "border-danger/40 bg-danger/10"
+            )}
+          >
+            <div className="truncate text-[9px] uppercase tracking-[0.18em] text-muted">{seg.label}</div>
+            <div className={classNames("mt-0.5 truncate text-xs font-semibold sm:text-sm", seg.tone)}>
+              {seg.value || "—"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CoachRosterColumn({ team, players, side, reverse = false, mobile = false }) {
   const tone = sideToneClasses(side);
   return (
@@ -5479,6 +6010,7 @@ function LayoutModeSwitch({ layoutMode, onChange, compact = false, mobileSite = 
         { id: "broadcast", label: compact ? "Desk" : "Broadcast" },
         { id: "overlay", label: "Overlay" },
         { id: "coach", label: "Coach" },
+        { id: "stream", label: "Stream" },
         { id: "phone", label: "Phone" },
       ];
 
