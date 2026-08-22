@@ -179,15 +179,15 @@ body.phone-live {
   backdrop-filter: blur(14px);
 }
 
-/* Stream mode — kill feed animations */
+/* Stream mode — kill feed animations (vertical) */
 @keyframes streamKillSlideIn {
   from {
     opacity: 0;
-    transform: translateX(-20px) scale(0.9);
+    transform: translateY(-12px) scale(0.92);
   }
   to {
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 

@@ -5567,7 +5567,8 @@ function StreamMatchView({
             </div>
           </div>
 
-          <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden">
+          <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_140px] gap-2 overflow-hidden">
+            {/* Radar */}
             <div className={classNames("panel min-h-0 overflow-hidden flex flex-col", fullscreen ? "rounded-none border-x-0 p-1.5" : "rounded-2xl p-2.5")}>
               <div className="mb-1 flex items-center justify-between px-1">
                 <div className="font-display text-xs uppercase tracking-[0.2em] text-muted">
@@ -5577,8 +5578,6 @@ function StreamMatchView({
                   {latestRadarMarker?.clock ? `Last frag ${latestRadarMarker.clock}` : "Awaiting first frag"}
                 </div>
               </div>
-              {/* Radar container — min-h-0 so it shrinks in flex/grid,
-                  h-full so RadarPanel gets actual pixel height. */}
               <div className="min-h-0 h-full">
                 <RadarPanel
                   mapName={activeMap.mapName}
@@ -5592,33 +5591,38 @@ function StreamMatchView({
               </div>
             </div>
 
-            {/* Kill feed strip — full width, all kills, animated */}
-            <div className={classNames("panel overflow-hidden", fullscreen ? "rounded-none border-x-0 px-2 py-1" : "rounded-2xl px-2.5 py-1.5")}>
-              <div className="flex items-center gap-2 overflow-x-auto scrollbar-thin" style={{ scrollbarWidth: "thin" }}>
-                <div className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-muted">Feed</div>
+            {/* Vertical kill feed — right side of center column */}
+            <div className={classNames("panel flex min-h-0 flex-col overflow-hidden", fullscreen ? "rounded-none border-x-0 px-1.5 py-1" : "rounded-2xl px-2 py-1.5")}>
+              <div className="mb-1.5 shrink-0 text-center text-[10px] uppercase tracking-[0.18em] text-muted">Feed</div>
+              <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto scrollbar-thin" style={{ scrollbarWidth: "thin" }}>
                 {roundKillFeed.length === 0 ? (
-                  <div className="text-[11px] text-muted">No frags yet this round.</div>
+                  <div className="text-[11px] text-muted">No frags yet.</div>
                 ) : (
-                  roundKillFeed.map((entry, idx) => {
-                    const isLatest = idx === roundKillFeed.length - 1;
+                  roundKillFeed.slice().reverse().map((entry, idx) => {
+                    const isLatest = idx === 0;
                     return (
                       <div
                         key={entry.id}
                         className={classNames(
-                          "stream-killfeed-item flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1",
+                          "stream-killfeed-item flex flex-col gap-0.5 rounded-lg border px-2 py-1.5",
                           entry.victimSide === "CT" ? "border-sky-500/25 bg-sky-500/10" : "border-accent/25 bg-accent/10",
                           isLatest && "stream-killfeed-latest"
                         )}
                         style={{ animationDelay: `${idx * 50}ms` }}
                       >
-                        <span className="numbers text-[10px] text-text">{entry.clock}</span>
-                        <span className="text-[11px] text-text">{entry.killerNickname ?? "—"}</span>
-                        <span className={classNames("rounded px-1 py-0.5 text-[9px] uppercase tracking-[0.16em]", entry.victimSide === "CT" ? "bg-sky-500/20 text-sky-300" : "bg-accent/20 text-accent")}>
-                          {entry.weaponLabel ?? "UTIL"}
-                        </span>
-                        <span className="text-[10px] text-muted">→</span>
-                        <span className="text-[11px] text-text">{entry.victimNickname ?? "—"}</span>
-                        {entry.headshot && <span className="text-[9px] text-red-400">HS</span>}
+                        <div className="flex items-center justify-between">
+                          <span className="numbers text-[9px] text-muted">{entry.clock}</span>
+                          {entry.headshot && <span className="text-[8px] font-bold text-red-400">HS</span>}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="truncate text-[11px] font-semibold text-text">{entry.killerNickname ?? "—"}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className={classNames("rounded px-1 py-0.5 text-[8px] uppercase tracking-[0.12em]", entry.victimSide === "CT" ? "bg-sky-500/20 text-sky-300" : "bg-accent/20 text-accent")}>
+                            {entry.weaponLabel ?? "UTIL"}
+                          </span>
+                          <span className="truncate text-[10px] text-muted">→ {entry.victimNickname ?? "—"}</span>
+                        </div>
                       </div>
                     );
                   })
