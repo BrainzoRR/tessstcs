@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { rowToEntry, entryToRow } from "@/lib/db-sync";
+import { isValidHistoryId, validateHistoryEntry } from "@/lib/historyValidation.js";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +21,20 @@ export async function GET() {
 
 /** POST /api/matches — save a single entry (upsert by id). */
 export async function POST(req: NextRequest) {
+  let body;
   try {
-    const body = await req.json();
-    const entry = body?.entry ?? body;
-    if (!entry?.id) {
-      return NextResponse.json({ error: "No id" }, { status: 400 });
-    }
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const entry = body && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, "entry")
+    ? body.entry
+    : body;
+  const error = validateHistoryEntry(entry);
+  if (error) {
+    return NextResponse.json({ error }, { status: 400 });
+  }
+  try {
     const row = entryToRow(entry);
     const dataJsonSize = row.dataJson.length;
     console.log(`[api/matches POST] id=${row.id} | dataJson=${dataJsonSize} bytes (${(dataJsonSize/1024).toFixed(1)} KB) | maps=${row.mapsLabel}`);
@@ -44,16 +53,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** DELETE /api/matches?ids=a,b,c — delete by ids; or all if no ids. */
+/** DELETE /api/matches?ids=a,b,c — only explicit, nonempty ids may be deleted. */
 export async function DELETE(req: NextRequest) {
   try {
     const idsParam = req.nextUrl.searchParams.get("ids");
-    if (idsParam) {
-      const ids = idsParam.split(",").filter(Boolean);
-      const result = await db.matchRecord.deleteMany({ where: { id: { in: ids } } });
-      return NextResponse.json({ deleted: result.count });
+    const ids = idsParam?.split(",") ?? [];
+    if (ids.length === 0 || ids.some((id) => !isValidHistoryId(id))) {
+      return NextResponse.json({ error: "Explicit nonempty ids are required" }, { status: 400 });
     }
-    const result = await db.matchRecord.deleteMany({});
+    const result = await db.matchRecord.deleteMany({ where: { id: { in: [...new Set(ids)] } } });
     return NextResponse.json({ deleted: result.count });
   } catch (err) {
     console.error("[api/matches DELETE]", err);

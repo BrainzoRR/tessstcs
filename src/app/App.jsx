@@ -71,6 +71,11 @@ import {
   buildHistoryEntry,
   buildResultsData,
 } from "@/lib/simulation";
+import { RADAR_ASSETS } from "../lib/radarData.js";
+import { buildRadarMarkers, getRadarViewBox, normalizeRadarLookupKey, resolveRadarZoneLabel, resolveRadarPosition, isRadarPointInRegion } from "../lib/radar.js";
+import { createArchiveSync, restorePendingHistory, OUTBOX_KEY } from "../lib/archiveSync.js";
+import { validateImport } from "../lib/historyValidation.js";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
   aggregateMapStats,
   aggregatePlayerStats,
@@ -140,6 +145,8 @@ function slimEntryForSync(entry) {
   }
   return { ...entry, data: slimmedData };
 }
+
+const LOCAL_PREVIEW = process.env.NEXT_PUBLIC_CS2_LOCAL_ONLY === "1";
 
 const NAV_ITEMS = [
   { id: "home", label: "Home", icon: House },
@@ -255,536 +262,9 @@ const COPY = {
   },
 };
 
-const COPY_RU = {
-  nav_home: "Главная",
-  nav_teams: "Команды",
-  nav_match_setup: "Матч",
-  nav_live: "Live Match",
-  nav_results: "Результаты",
-  nav_history: "История",
-  app_title: "CS2 Pro Match Simulator",
-  app_tagline: "Темная серверная. Полный контроль серии.",
-  language: "Язык",
-  last_saved: "Последнее сохранение",
-  not_saved: "Еще не сохранено",
-  export_all_data: "Экспортировать все данные",
-  import_data: "Импортировать данные",
-  dashboard: "Дашборд",
-  quick_start: "Быстрый старт",
-  top_teams: "Топ команд",
-  recent_results: "Последние результаты",
-  open_team_manager: "Открыть менеджер команд",
-  open_history: "Открыть историю",
-  team_manager: "Менеджер команд",
-  new_team: "Новая команда",
-  save_team: "Сохранить команду",
-  delete_team: "Удалить",
-  match_setup: "Настройка матча",
-  start_veto: "Начать veto",
-  series_rules: "Правила серии",
-  checklist: "Чеклист",
-  veto_screen: "Экран veto",
-  series_order: "Порядок карт",
-  round_history: "История раундов",
-  live_match: "Live Match",
-  round_hud: "HUD раунда",
-  live_feed: "Live лента",
-  economy_graph: "График экономики",
-  series_results: "Итоги серии",
-  highlights: "Хайлайты",
-  map_breakdown: "Разбор карт",
-  full_player_stats: "Полная статистика игроков",
-  history: "История",
-  clear_history: "Очистить историю",
-  filter_by_team: "Фильтр по команде",
-  combined: "Все вместе",
-  by_team: "По командам",
-  player: "Игрок",
-  team: "Команда",
-  rating: "Рейтинг",
-  open_team_manager_short: "Менеджер команд",
-};
+const COPY_RU = { ...COPY.ru, nav_stats: "Статистика", nav_live: "В эфире", app_tagline: "Каждый раунд имеет значение" };
 
-const RADAR_ASSETS = {
-  Mirage: { upper: "/radars/mirage.webp" },
-  Inferno: { upper: "/radars/inferno.webp" },
-  Nuke: { upper: "/radars/nuke-upper.webp", lower: "/radars/nuke-lower.webp" },
-  Overpass: { upper: "/radars/overpass.webp" },
-  Dust: { upper: "/radars/dust2.webp" },
-  Ancient: { upper: "/radars/ancient.webp" },
-  Anubis: { upper: "/radars/anubis.webp" },
-  Cache: { upper: "/radars/cache.webp" },
-};
 
-const RADAR_VIEWBOXES = {
-  Mirage: {
-    upper: { left: 0.08, top: 0.07, width: 0.84, height: 0.85 },
-  },
-  Inferno: {
-    upper: { left: 0.04, top: 0.03, width: 0.9, height: 0.92 },
-  },
-  Nuke: {
-    upper: { left: 0.18, top: 0.16, width: 0.7, height: 0.62 },
-    lower: { left: 0.38, top: 0.34, width: 0.34, height: 0.42 },
-  },
-  Overpass: {
-    upper: { left: 0.09, top: 0.03, width: 0.79, height: 0.93 },
-  },
-  Dust: {
-    upper: { left: 0.02, top: 0.03, width: 0.95, height: 0.91 },
-  },
-  Ancient: {
-    upper: { left: 0.14, top: 0.09, width: 0.73, height: 0.79 },
-  },
-  Anubis: {
-    upper: { left: 0.16, top: 0.05, width: 0.74, height: 0.91 },
-  },
-  Cache: {
-    upper: { left: 0, top: 0, width: 1, height: 1 },
-  },
-};
-
-function radarRegion(x, y, width, height, level = "upper", space = "view") {
-  return { x, y, width, height, level, space };
-}
-
-function radarPoint(x, y, level = "upper", space = "view") {
-  return radarRegion(x, y, 0.024, 0.024, level, space);
-}
-
-function radarAnchors(points, level = "upper", space = "view", radius = 0.022) {
-  return {
-    anchors: points,
-    radius,
-    level,
-    space,
-  };
-}
-
-function radarPolygon(points, level = "upper", space = "absolute") {
-  return {
-    polygon: points,
-    level,
-    space,
-  };
-}
-
-const RADAR_SITE_FALLBACKS = {
-  Mirage: {
-    A: radarAnchors([[0.72, 0.49], [0.77, 0.43], [0.66, 0.58]]),
-    B: radarAnchors([[0.18, 0.57], [0.24, 0.61], [0.26, 0.52]]),
-    Mid: radarAnchors([[0.49, 0.68], [0.5, 0.52], [0.39, 0.54]]),
-  },
-  Inferno: {
-    A: radarAnchors([[0.72, 0.75], [0.82, 0.78], [0.61, 0.72]]),
-    B: radarAnchors([[0.2, 0.17], [0.23, 0.23], [0.22, 0.39]]),
-    Mid: radarAnchors([[0.47, 0.58], [0.61, 0.56], [0.52, 0.72]]),
-  },
-  Nuke: {
-    A: radarAnchors([[0.56, 0.46], [0.62, 0.39], [0.64, 0.57]]),
-    B: radarAnchors([[0.55, 0.46], [0.49, 0.56], [0.69, 0.59]], "lower"),
-    Mid: radarAnchors([[0.18, 0.55], [0.79, 0.58], [0.32, 0.54]]),
-  },
-  Overpass: {
-    A: radarAnchors([[0.77, 0.23], [0.82, 0.31], [0.65, 0.22]]),
-    B: radarAnchors([[0.24, 0.59], [0.18, 0.74], [0.37, 0.67]]),
-    Mid: radarAnchors([[0.54, 0.26], [0.46, 0.46], [0.66, 0.13]]),
-  },
-  Dust: {
-    A: radarAnchors([[0.8, 0.17], [0.69, 0.27], [0.12, 0.58]]),
-    B: radarAnchors([[0.12, 0.14], [0.22, 0.14], [0.34, 0.31]]),
-    Mid: radarAnchors([[0.5, 0.29], [0.52, 0.39], [0.39, 0.47]]),
-  },
-  Ancient: {
-    A: radarAnchors([[0.72, 0.38], [0.39, 0.47], [0.24, 0.7]]),
-    B: radarAnchors([[0.17, 0.22], [0.24, 0.33], [0.13, 0.31]]),
-    Mid: radarAnchors([[0.46, 0.53], [0.47, 0.61], [0.39, 0.47]]),
-  },
-  Anubis: {
-    A: radarAnchors([[0.24, 0.8], [0.22, 0.56], [0.36, 0.39]]),
-    B: radarAnchors([[0.84, 0.19], [0.81, 0.19], [0.73, 0.3]]),
-    Mid: radarAnchors([[0.46, 0.74], [0.51, 0.53], [0.57, 0.64]]),
-  },
-  // Cache layout (de_cache CS2): A site = center-left, B site = center, Mid = center.
-  Cache: {
-    A: radarAnchors([[0.31, 0.44], [0.29, 0.42], [0.33, 0.46]]),
-    B: radarAnchors([[0.50, 0.52], [0.48, 0.50], [0.52, 0.54]]),
-    Mid: radarAnchors([[0.47, 0.35], [0.45, 0.37], [0.49, 0.33]]),
-  },
-};
-
-const RADAR_ZONE_POSITIONS = {
-  Mirage: {
-    "A ramp": radarAnchors([[0.6, 0.79], [0.63, 0.76]]),
-    palace: radarAnchors([[0.63, 0.16], [0.6, 0.18]]),
-    ticket: radarAnchors([[0.79, 0.43], [0.82, 0.41]]),
-    jungle: radarAnchors([[0.67, 0.53], [0.7, 0.56]]),
-    apartments: radarAnchors([[0.23, 0.14], [0.26, 0.17], [0.28, 0.2]]),
-    bench: radarAnchors([[0.19, 0.6], [0.22, 0.61]]),
-    market: radarAnchors([[0.29, 0.52], [0.31, 0.55]]),
-    van: radarAnchors([[0.14, 0.56], [0.16, 0.59]]),
-    "top mid": radarAnchors([[0.48, 0.69], [0.52, 0.67]]),
-    window: radarAnchors([[0.49, 0.52], [0.51, 0.5]]),
-    connector: radarAnchors([[0.6, 0.62], [0.62, 0.65]]),
-    catwalk: radarAnchors([[0.35, 0.53], [0.39, 0.53]]),
-  },
-  Inferno: {
-    short: radarAnchors([[0.59, 0.73], [0.62, 0.7]]),
-    library: radarAnchors([[0.77, 0.66], [0.79, 0.63]]),
-    pit: radarAnchors([[0.84, 0.79], [0.81, 0.75]]),
-    "site::A": radarAnchors([[0.72, 0.76], [0.75, 0.73]]),
-    banana: radarAnchors([[0.21, 0.46], [0.23, 0.38], [0.24, 0.3]]),
-    coffins: radarAnchors([[0.15, 0.12], [0.18, 0.11]]),
-    "new box": radarAnchors([[0.22, 0.13], [0.24, 0.16]]),
-    dark: radarAnchors([[0.14, 0.21], [0.16, 0.24]]),
-    mid: radarAnchors([[0.47, 0.59], [0.5, 0.56]]),
-    arch: radarAnchors([[0.61, 0.56], [0.64, 0.54]]),
-    boiler: radarAnchors([[0.51, 0.71], [0.54, 0.73]]),
-    lane: radarAnchors([[0.43, 0.73], [0.46, 0.74]]),
-  },
-  Nuke: {
-    outside: radarAnchors([[0.17, 0.53], [0.22, 0.57], [0.28, 0.6]]),
-    mini: radarAnchors([[0.56, 0.5], [0.54, 0.46]]),
-    hut: radarAnchors([[0.64, 0.57], [0.63, 0.52]]),
-    heaven: radarAnchors([[0.61, 0.37], [0.58, 0.34]]),
-    ramp: radarAnchors([[0.42, 0.57], [0.44, 0.61]], "lower", "absolute"),
-    fork: radarAnchors([[0.47, 0.47], [0.49, 0.49]], "lower", "absolute"),
-    decon: radarAnchors([[0.61, 0.5], [0.63, 0.54]], "lower", "absolute"),
-    "double doors": radarAnchors([[0.47, 0.47], [0.49, 0.49]], "lower", "absolute"),
-    "site::B": radarAnchors([[0.53, 0.57], [0.55, 0.61]], "lower", "absolute"),
-    garage: radarAnchors([[0.08, 0.55], [0.1, 0.58]]),
-    secret: radarAnchors([[0.66, 0.6], [0.68, 0.67]], "lower", "absolute"),
-    lobby: radarAnchors([[0.79, 0.58], [0.75, 0.56], [0.83, 0.6]]),
-  },
-  Overpass: {
-    long: radarAnchors([[0.74, 0.22], [0.77, 0.25]]),
-    bathrooms: radarAnchors([[0.63, 0.23], [0.66, 0.22]]),
-    truck: radarAnchors([[0.82, 0.31], [0.79, 0.33]]),
-    "site::A": radarAnchors([[0.79, 0.24], [0.81, 0.28]]),
-    monster: radarAnchors([[0.17, 0.74], [0.2, 0.69]]),
-    "short::B": radarAnchors([[0.37, 0.67], [0.35, 0.63]]),
-    pillar: radarAnchors([[0.27, 0.64], [0.24, 0.61]]),
-    "site::B": radarAnchors([[0.24, 0.59], [0.28, 0.6]]),
-    connector: radarAnchors([[0.46, 0.46], [0.43, 0.49]]),
-    fountain: radarAnchors([[0.54, 0.26], [0.51, 0.26]]),
-    party: radarAnchors([[0.66, 0.13], [0.69, 0.12]]),
-    "short::Mid": radarAnchors([[0.4, 0.54], [0.37, 0.56]]),
-  },
-  Dust: {
-    long: radarAnchors([[0.12, 0.58], [0.16, 0.62], [0.19, 0.64]]),
-    catwalk: radarAnchors([[0.68, 0.26], [0.64, 0.29]]),
-    "A site": radarAnchors([[0.8, 0.17], [0.76, 0.17]]),
-    "short::A": radarAnchors([[0.69, 0.27], [0.65, 0.3]]),
-    tunnels: radarAnchors([[0.21, 0.12], [0.24, 0.14], [0.27, 0.16]]),
-    window: radarAnchors([[0.2, 0.2], [0.18, 0.18]]),
-    "B site": radarAnchors([[0.11, 0.14], [0.13, 0.17], [0.15, 0.13]]),
-    door: radarAnchors([[0.33, 0.31], [0.36, 0.29]]),
-    mid: radarAnchors([[0.52, 0.39], [0.48, 0.4]]),
-    xbox: radarAnchors([[0.59, 0.38], [0.57, 0.36]]),
-    "lower tunnels": radarAnchors([[0.39, 0.47], [0.36, 0.45]]),
-    "top mid": radarAnchors([[0.49, 0.29], [0.53, 0.28]]),
-  },
-  Ancient: {
-    "A main": radarAnchors([[0.24, 0.7], [0.26, 0.74]]),
-    donut: radarAnchors([[0.39, 0.47], [0.36, 0.49]]),
-    temple: radarAnchors([[0.72, 0.44], [0.69, 0.42]]),
-    "site::A": radarAnchors([[0.73, 0.38], [0.69, 0.37]]),
-    cave: radarAnchors([[0.17, 0.22], [0.2, 0.24]]),
-    lane: radarAnchors([[0.24, 0.33], [0.27, 0.35]]),
-    "back site": radarAnchors([[0.13, 0.31], [0.15, 0.28]]),
-    ramp: radarAnchors([[0.35, 0.31], [0.38, 0.3]]),
-    mid: radarAnchors([[0.46, 0.53], [0.49, 0.55]]),
-    "red room": radarAnchors([[0.47, 0.61], [0.45, 0.64]]),
-    boost: radarAnchors([[0.41, 0.47], [0.43, 0.5]]),
-  },
-  Anubis: {
-    "A main": radarAnchors([[0.24, 0.8], [0.28, 0.76]]),
-    heaven: radarAnchors([[0.28, 0.24], [0.26, 0.28]]),
-    "bridge::A": radarAnchors([[0.36, 0.39], [0.39, 0.41]]),
-    "site::A": radarAnchors([[0.22, 0.56], [0.24, 0.6]]),
-    canal: radarAnchors([[0.84, 0.19], [0.81, 0.23]]),
-    pillar: radarAnchors([[0.73, 0.3], [0.69, 0.31]]),
-    "site::B": radarAnchors([[0.81, 0.19], [0.77, 0.18]]),
-    "bridge::B": radarAnchors([[0.66, 0.34], [0.63, 0.36]]),
-    mid: radarAnchors([[0.51, 0.53], [0.48, 0.5]]),
-    connector: radarAnchors([[0.55, 0.44], [0.52, 0.43]]),
-    water: radarAnchors([[0.57, 0.64], [0.54, 0.67]]),
-    "top mid": radarAnchors([[0.46, 0.74], [0.43, 0.71]]),
-  },
-  // Cache zone positions — coordinates taken directly from a labeled Cache
-  // radar (ПОЗИЦИИКЭШ.jpg): A SITE ~0.31, B SITE ~0.50, T SPAWN ~0.91 (right),
-  // CT SPAWN ~0.07 (left). A main / B halls are approach lanes FROM T spawn
-  // towards the sites — placed between T spawn and the bombsites so death
-  // markers for T attackers land on the approach, not on T spawn itself.
-  Cache: {
-    // A site (CT defense) — center-left, the bombsite itself
-    "site::A": radarAnchors([[0.31, 0.44], [0.29, 0.42], [0.33, 0.46]]),
-    quad: radarAnchors([[0.35, 0.40], [0.33, 0.38]]),
-    "forklift": radarAnchors([[0.28, 0.48], [0.30, 0.50]]),
-    "sandbags": radarAnchors([[0.33, 0.48], [0.31, 0.50]]),
-    highway: radarAnchors([[0.38, 0.40], [0.40, 0.38]]),
-    // A approaches (T attack) — Long A lane from mid towards A
-    "A main": radarAnchors([[0.56, 0.33], [0.54, 0.35], [0.58, 0.31]]),
-    squeaky: radarAnchors([[0.47, 0.35], [0.45, 0.37]]),
-    // B site (CT defense) — center, the bombsite
-    "site::B": radarAnchors([[0.50, 0.52], [0.48, 0.50], [0.52, 0.54]]),
-    toxic: radarAnchors([[0.45, 0.56], [0.47, 0.54]]),
-    checkers: radarAnchors([[0.53, 0.56], [0.51, 0.58]]),
-    // B approaches (T attack) — B main / B corridor from T spawn towards B
-    "B halls": radarAnchors([[0.40, 0.69], [0.38, 0.71], [0.42, 0.67]]),
-    "z-connector": radarAnchors([[0.52, 0.75], [0.50, 0.73]]),
-    // Mid (center) — main mid / construction
-    mid: radarAnchors([[0.47, 0.35], [0.45, 0.37], [0.49, 0.33]]),
-    vents: radarAnchors([[0.42, 0.61], [0.40, 0.63]]),
-  },
-};
-
-const RADAR_ZONE_ALIASES = {
-  Mirage: {
-    "a ramp": "A Ramp",
-    palace: "Palace",
-    "a site": "A Site",
-    "b site": "B Site",
-    ticket: "Ticket Booth",
-    "ticket booth": "Ticket Booth",
-    jungle: "Jungle",
-    apartments: "B Apartments",
-    "b apartments": "B Apartments",
-    bench: "Bench",
-    market: "Market",
-    van: "Van",
-    mid: "Mid",
-    "top mid": "Top Mid",
-    window: "Sniper's Nest",
-    connector: "Connector",
-    catwalk: "Catwalk",
-    "site::a": "A Site",
-    "site::b": "B Site",
-    "site::mid": "Mid",
-  },
-  Inferno: {
-    short: "A Short",
-    library: "Library",
-    pit: "Pit",
-    "a site": "A Site",
-    "b site": "B Site",
-    site: "A Site",
-    banana: "Banana",
-    coffins: "Coffins",
-    "new box": "Quad",
-    dark: "Dark",
-    mid: "Mid",
-    arch: "Arch",
-    boiler: "Boiler",
-    lane: "Patio",
-    "site::a": "A Site",
-    "site::b": "B Site",
-    "site::mid": "Mid",
-  },
-  Nuke: {
-    outside: "Outside",
-    garage: "Garage",
-    lobby: "Lobby",
-    mini: "Mini",
-    hut: "Hut",
-    heaven: "Heaven",
-    secret: "Secret",
-    ramp: "Ramp",
-    fork: "Fork",
-    decon: "Decon",
-    "double doors": "Fork",
-    doors: "Doors",
-    "b site": "B Site",
-    "a site": "A Site",
-    "site::a": "A Site",
-    "site::b": "B Site",
-    main: "Main",
-  },
-  Dust: {
-    long: "A Long",
-    catwalk: "Catwalk",
-    "a site": "A Default Plant",
-    "short::a": "A Short",
-    tunnels: "Upper B Tunnels",
-    "upper tunnels": "Upper B Tunnels",
-    "lower tunnels": "Lower B Tunnels",
-    window: "B Window",
-    "b site": "B Default Plant",
-    "b doors": "B Doors",
-    door: "B Doors",
-    doors: "B Doors",
-    mid: "Mid",
-    xbox: "Xbox",
-    "top mid": "Top Mid",
-    "site::a": "A Default Plant",
-    "site::b": "B Default Plant",
-    "site::mid": "Mid",
-  },
-  Overpass: {
-    long: "A Long",
-    bathrooms: "Toilets",
-    "a site": "A Site",
-    "b site": "B Site",
-    truck: "Van",
-    monster: "Monster",
-    "short::b": "B Short",
-    pillar: "Pillar",
-    connector: "Connector",
-    fountain: "Fountain",
-    party: "Party",
-    "short::mid": "A Short",
-    "site::a": "A Site",
-    "site::b": "B Site",
-  },
-  Ancient: {
-    "a main": "A Main",
-    temple: "Temple",
-    ramp: "Ramp",
-    mid: "Mid",
-    boost: "Boost",
-    water: "Water",
-    heaven: "Heaven",
-    doors: "Doors",
-    "site::a": "A Site",
-    "site::b": "B Site",
-  },
-  Anubis: {
-    "top mid": "Top Mid",
-    water: "Water",
-    pillar: "Pillar",
-    "a main": "Main",
-    main: "Main",
-    connector: "A Connector",
-    "a connector": "A Connector",
-    heaven: "Heaven",
-    "bridge::a": "Bridge",
-    "bridge::b": "Bridge",
-    bridge: "Bridge",
-    "site::a": "A Site",
-    "site::b": "B Site",
-  },
-  Cache: {
-    "a main": "A Main",
-    "main": "A Main",
-    squeaky: "Squeaky",
-    highway: "Highway",
-    quad: "Quad",
-    mid: "Mid",
-    vents: "Vents",
-    "z-connector": "Z-Connector",
-    "z connector": "Z-Connector",
-    checkers: "Checkers",
-    "b halls": "B Halls",
-    halls: "B Halls",
-    toxic: "Toxic",
-    forklift: "Forklift",
-    sandbags: "Sandbags",
-    "site::a": "A Site",
-    "site::b": "B Site",
-  },
-};
-
-const RADAR_ZONE_POLYGONS = {
-  Mirage: {
-    "A Ramp": radarPolygon([[0.675, 0.675], [0.7775, 0.6737], [0.7837, 0.55], [0.7412, 0.55], [0.74, 0.6075], [0.67, 0.6088]]),
-    Palace: radarPolygon([[0.6262, 0.8037], [0.8462, 0.8075], [0.8438, 0.6837], [0.9113, 0.6], [0.81, 0.6025], [0.8075, 0.7137], [0.685, 0.715], [0.6875, 0.7612], [0.6275, 0.7612]]),
-    "Ticket Booth": radarPolygon([[0.46, 0.7937], [0.4838, 0.8325], [0.4675, 0.86], [0.4113, 0.8325]]),
-    Jungle: radarPolygon([[0.3762, 0.6425], [0.49, 0.6525], [0.485, 0.5813], [0.3688, 0.5713]]),
-    "B Apartments": radarPolygon([[0.2225, 0.2062], [0.3987, 0.2087], [0.4012, 0.2675], [0.44, 0.27], [0.4437, 0.17], [0.22, 0.1625]]),
-    Bench: radarPolygon([[0.1037, 0.3212], [0.1638, 0.3237], [0.1737, 0.2213], [0.1013, 0.2238]]),
-    Market: radarPolygon([[0.1688, 0.4725], [0.335, 0.48], [0.33, 0.4275], [0.2813, 0.4288], [0.2725, 0.3887], [0.1663, 0.3875]]),
-    Van: radarPolygon([[0.16, 0.2188], [0.2213, 0.215], [0.2162, 0.165], [0.1663, 0.1725]]),
-    Mid: radarPolygon([[0.4462, 0.385], [0.7388, 0.3812], [0.735, 0.52], [0.5537, 0.5162], [0.5537, 0.49], [0.44, 0.4963]]),
-    "Top Mid": radarPolygon([[0.6412, 0.525], [0.7412, 0.5275], [0.7412, 0.3625], [0.6138, 0.3575]]),
-    "Sniper's Nest": radarPolygon([[0.3713, 0.545], [0.4175, 0.5525], [0.4188, 0.44], [0.385, 0.44]]),
-    Connector: radarPolygon([[0.4688, 0.585], [0.5375, 0.59], [0.5337, 0.4925], [0.4688, 0.4938]]),
-    Catwalk: radarPolygon([[0.45, 0.4375], [0.6713, 0.4375], [0.6737, 0.39], [0.4487, 0.3887]]),
-    "A Site": radarPolygon([[0.475, 0.8363], [0.6125, 0.8125], [0.625, 0.725], [0.4725, 0.74]]),
-    "B Site": radarPolygon([[0.1837, 0.33], [0.2725, 0.3337], [0.2787, 0.24], [0.1837, 0.24]]),
-  },
-  Inferno: {
-    "A Short": radarPolygon([[0.6825, 0.7937], [0.8237, 0.7975], [0.8237, 0.7375], [0.7212, 0.7388], [0.7238, 0.6875], [0.6763, 0.69]]),
-    Library: radarPolygon([[0.9, 0.565], [0.9575, 0.565], [0.96, 0.5062], [0.8988, 0.505]]),
-    Pit: radarPolygon([[0.8175, 0.8037], [0.9, 0.7675], [0.9437, 0.77], [0.9575, 0.8775], [0.8237, 0.88]]),
-    "A Site": radarPolygon([[0.7688, 0.6275], [0.7712, 0.735], [0.8413, 0.7338], [0.8425, 0.6225]]),
-    Banana: radarPolygon([[0.3975, 0.505], [0.3962, 0.4838], [0.4925, 0.3425], [0.5463, 0.3463], [0.5475, 0.3287], [0.6088, 0.3287], [0.625, 0.4125], [0.52, 0.405], [0.475, 0.4875], [0.4788, 0.5337], [0.4575, 0.56], [0.4275, 0.56]]),
-    Coffins: radarPolygon([[0.5062, 0.1725], [0.5413, 0.1775], [0.5387, 0.1325], [0.505, 0.1363]]),
-    Quad: radarPolygon([[0.4138, 0.2675], [0.45, 0.27], [0.4537, 0.235], [0.4138, 0.2338]]),
-    Dark: radarPolygon([[0.4, 0.155], [0.45, 0.1563], [0.45, 0.1225], [0.39, 0.1237]]),
-    Mid: radarPolygon([[0.4213, 0.6863], [0.675, 0.69], [0.6737, 0.6312], [0.4213, 0.6288]]),
-    Arch: radarPolygon([[0.765, 0.5238], [0.7963, 0.525], [0.7987, 0.4525], [0.7625, 0.4512]]),
-    Boiler: radarPolygon([[0.6412, 0.7212], [0.6825, 0.7212], [0.6875, 0.6875], [0.6425, 0.6875]]),
-    Patio: radarPolygon([[0.6787, 0.795], [0.7238, 0.8025], [0.7262, 0.7612], [0.6813, 0.7612]]),
-    "B Site": radarPolygon([[0.4375, 0.2675], [0.5313, 0.2662], [0.5337, 0.1688], [0.4387, 0.1713]]),
-  },
-  Nuke: {
-    Outside: radarPolygon([[0.4612, 0.7075], [0.5925, 0.7512], [0.6963, 0.745], [0.6913, 0.6238], [0.7612, 0.6275], [0.76, 0.5687], [0.71, 0.575], [0.71, 0.52], [0.6262, 0.5188], [0.625, 0.6175], [0.6038, 0.6188], [0.605, 0.6525], [0.55, 0.6525], [0.5513, 0.6175], [0.5238, 0.6188]], "upper", "absolute"),
-    "A Site": radarPolygon([[0.6212, 0.44], [0.6262, 0.6162], [0.5175, 0.6138], [0.5212, 0.445]], "upper", "absolute"),
-    Garage: radarPolygon([[0.6625, 0.7013], [0.6937, 0.6963], [0.6925, 0.73], [0.7775, 0.7338], [0.78, 0.6262], [0.6613, 0.6238]], "upper", "absolute"),
-    Lobby: radarPolygon([[0.4163, 0.57], [0.5212, 0.5687], [0.52, 0.4975], [0.4475, 0.4975], [0.4462, 0.5138], [0.4163, 0.5138]], "upper", "absolute"),
-    Main: radarPolygon([[0.5487, 0.6538], [0.605, 0.6538], [0.6025, 0.6162], [0.5487, 0.6175]], "upper", "absolute"),
-    Mini: radarPolygon([[0.626, 0.545], [0.679, 0.545], [0.679, 0.614], [0.626, 0.614]], "upper", "absolute"),
-    Hut: radarPolygon([[0.5262, 0.5713], [0.5525, 0.5713], [0.55, 0.53], [0.5225, 0.5313]], "upper", "absolute"),
-    Heaven: radarPolygon([[0.62, 0.445], [0.6813, 0.4437], [0.685, 0.485], [0.6212, 0.485]], "upper", "absolute"),
-    Ramp: radarPolygon([[0.39, 0.51], [0.45, 0.5], [0.47, 0.57], [0.45, 0.66], [0.4, 0.66], [0.38, 0.57]], "lower", "absolute"),
-    Fork: radarPolygon([[0.44, 0.44], [0.5, 0.44], [0.51, 0.5], [0.45, 0.52]], "lower", "absolute"),
-    Decon: radarPolygon([[0.59, 0.45], [0.66, 0.45], [0.66, 0.57], [0.59, 0.57]], "lower", "absolute"),
-    Doors: radarPolygon([[0.49, 0.34], [0.57, 0.34], [0.57, 0.4], [0.49, 0.4]], "lower", "absolute"),
-    "B Site": radarPolygon([[0.47, 0.47], [0.59, 0.47], [0.59, 0.66], [0.47, 0.66]], "lower", "absolute"),
-    Secret: radarPolygon([[0.63, 0.52], [0.7, 0.52], [0.7, 0.73], [0.64, 0.73]], "lower", "absolute"),
-  },
-  Dust: {
-    "A Long": radarPolygon([[0.8263, 0.4263], [0.855, 0.4375], [0.8325, 0.4925], [0.91, 0.4925], [0.9163, 0.2838], [0.8225, 0.275]]),
-    Catwalk: radarPolygon([[0.4938, 0.5925], [0.495, 0.3787], [0.5238, 0.3787], [0.5238, 0.595]]),
-    "A Default Plant": radarPolygon([[0.7887, 0.1862], [0.83, 0.1925], [0.8313, 0.1437], [0.7825, 0.1437]]),
-    "A Short": radarPolygon([[0.6687, 0.1625], [0.6675, 0.425], [0.515, 0.4213], [0.515, 0.3725], [0.605, 0.375], [0.6062, 0.1575]]),
-    "Upper B Tunnels": radarPolygon([[0.0675, 0.5025], [0.2938, 0.4938], [0.295, 0.4338], [0.1862, 0.4363], [0.1875, 0.4025], [0.06, 0.4075]]),
-    "Lower B Tunnels": radarPolygon([[0.2813, 0.4325], [0.4325, 0.4375], [0.4363, 0.3725], [0.2762, 0.3775]]),
-    "B Window": radarPolygon([[0.2462, 0.15], [0.2787, 0.15], [0.2762, 0.11], [0.2437, 0.1087]]),
-    "B Default Plant": radarPolygon([[0.2275, 0.1725], [0.2625, 0.1787], [0.2737, 0.1437], [0.2263, 0.1437]]),
-    "B Doors": radarPolygon([[0.2338, 0.265], [0.2712, 0.2662], [0.2712, 0.2087], [0.2325, 0.2062]]),
-    Mid: radarPolygon([[0.435, 0.5887], [0.4925, 0.5887], [0.4938, 0.4225], [0.4375, 0.42]]),
-    Xbox: radarPolygon([[0.4675, 0.425], [0.4975, 0.4275], [0.5012, 0.3862], [0.455, 0.385]]),
-    "Top Mid": radarPolygon([[0.4562, 0.6512], [0.5925, 0.675], [0.6038, 0.6025], [0.4437, 0.6025]]),
-  },
-  Overpass: {
-    "A Site": radarPolygon([[0.4175, 0.22], [0.515, 0.2625], [0.5725, 0.2125], [0.4487, 0.1563]]),
-    "A Long": radarPolygon([[0.1563, 0.6563], [0.1563, 0.3887], [0.26, 0.3312], [0.3212, 0.2125], [0.365, 0.2338], [0.305, 0.3425], [0.3025, 0.405], [0.2437, 0.4113], [0.2425, 0.5225], [0.2712, 0.525], [0.27, 0.7125], [0.305, 0.7813], [0.2362, 0.81]]),
-    Connector: radarPolygon([[0.4775, 0.5938], [0.5625, 0.6], [0.5613, 0.5575], [0.4888, 0.5587]]),
-    Party: radarPolygon([[0.3088, 0.675], [0.3088, 0.5262], [0.3638, 0.5262], [0.3762, 0.6887], [0.3287, 0.7125]]),
-    Fountain: radarPolygon([[0.4225, 0.7312], [0.455, 0.7175], [0.4525, 0.6813], [0.42, 0.6763], [0.3912, 0.7087]]),
-    Monster: radarPolygon([[0.795, 0.4675], [0.7887, 0.3875], [0.8425, 0.3962], [0.8363, 0.4625]]),
-    "B Short": radarPolygon([[0.7037, 0.425], [0.705, 0.385], [0.7525, 0.3862], [0.7512, 0.4612], [0.685, 0.4587]]),
-    Pillar: radarPolygon([[0.715, 0.3038], [0.7525, 0.3075], [0.7562, 0.3412], [0.7113, 0.3387]]),
-    "B Site": radarPolygon([[0.6675, 0.3538], [0.7288, 0.3538], [0.7225, 0.2875], [0.6613, 0.2938]]),
-    Toilets: radarPolygon([[0.3987, 0.4938], [0.425, 0.4163], [0.385, 0.3725], [0.3862, 0.3463], [0.4313, 0.3488], [0.4587, 0.3713], [0.4637, 0.49], [0.4313, 0.525], [0.3912, 0.525]]),
-    Van: radarPolygon([[0.3663, 0.1487], [0.4238, 0.1563], [0.4288, 0.135], [0.375, 0.1275]]),
-    "A Short": radarPolygon([[0.36, 0.3113], [0.3875, 0.265], [0.505, 0.3262], [0.54, 0.5112], [0.4925, 0.5563], [0.4612, 0.495], [0.4637, 0.375], [0.4325, 0.3475], [0.3638, 0.345]]),
-  },
-  Ancient: {
-    "A Main": radarPolygon([[0.125, 0.38], [0.1275, 0.4263], [0.2412, 0.4238], [0.2412, 0.3812]]),
-    Temple: radarPolygon([[0.4425, 0.1412], [0.4313, 0.1412], [0.4263, 0.1338], [0.3412, 0.1363], [0.34, 0.1713], [0.37, 0.175], [0.3688, 0.165], [0.3962, 0.1675], [0.3962, 0.1737], [0.4225, 0.175], [0.4225, 0.1663], [0.4412, 0.165]]),
-    "A Site": radarPolygon([[0.2662, 0.235], [0.2612, 0.2825], [0.3412, 0.2838], [0.3412, 0.235]]),
-    Ramp: radarPolygon([[0.8025, 0.475], [0.8325, 0.4775], [0.8325, 0.4975], [0.8475, 0.5], [0.85, 0.5975], [0.8063, 0.5962]]),
-    Mid: radarPolygon([[0.5238, 0.5513], [0.425, 0.55], [0.44, 0.5288], [0.4412, 0.49], [0.4238, 0.47], [0.4225, 0.4437], [0.5025, 0.4437], [0.505, 0.4838], [0.5225, 0.4825]]),
-    Water: radarPolygon([[0.6725, 0.8413], [0.7212, 0.8387], [0.7212, 0.7462], [0.7275, 0.735], [0.6725, 0.7375]]),
-    Boost: radarPolygon([[0.195, 0.3237], [0.1975, 0.3563], [0.2263, 0.3563], [0.2263, 0.3375], [0.2525, 0.3375], [0.2487, 0.325]]),
-    "B Site": radarPolygon([[0.7025, 0.38], [0.7037, 0.4387], [0.78, 0.435], [0.7837, 0.4275], [0.79, 0.42], [0.7925, 0.4125], [0.7913, 0.4012], [0.7837, 0.3887], [0.77, 0.3837]]),
-    Heaven: radarPolygon([[0.5238, 0.5513], [0.525, 0.595], [0.5337, 0.595], [0.5337, 0.59], [0.5813, 0.5913], [0.5875, 0.5737], [0.5863, 0.5537]]),
-    Doors: radarPolygon([[0.77, 0.5975], [0.8063, 0.5988], [0.8013, 0.6225], [0.7712, 0.6225]]),
-  },
-  Anubis: {
-    "Top Mid": radarPolygon([[0.4248, 0.6465], [0.4238, 0.6836], [0.4463, 0.709], [0.4492, 0.7031], [0.4932, 0.7041], [0.5059, 0.709], [0.5186, 0.7041], [0.5352, 0.708], [0.5439, 0.7148], [0.5859, 0.6758], [0.541, 0.6748], [0.541, 0.665], [0.5293, 0.6641], [0.5293, 0.6328], [0.4336, 0.6318], [0.4336, 0.6445]]),
-    Water: radarPolygon([[0.4365, 0.5625], [0.4385, 0.6152], [0.46, 0.6152], [0.46, 0.6084], [0.4863, 0.6074], [0.5205, 0.6074], [0.5449, 0.6084], [0.5439, 0.6162], [0.5967, 0.6172], [0.5967, 0.6221], [0.6172, 0.6211], [0.6191, 0.5664], [0.5928, 0.5645], [0.5928, 0.5527], [0.5439, 0.5508], [0.5439, 0.5654], [0.5176, 0.5654], [0.4863, 0.5645], [0.4609, 0.5645]]),
-    Pillar: radarPolygon([[0.3623, 0.543], [0.3623, 0.5781], [0.2793, 0.5781], [0.2588, 0.5557], [0.2881, 0.543]]),
-    "B Site": radarPolygon([[0.3154, 0.5264], [0.3633, 0.5273], [0.3623, 0.4824], [0.3389, 0.459], [0.3145, 0.459]]),
-    Bridge: radarPolygon([[0.4951, 0.4893], [0.4932, 0.502], [0.4824, 0.5039], [0.4795, 0.5195], [0.4814, 0.541], [0.4863, 0.541], [0.4814, 0.541], [0.4854, 0.5654], [0.4814, 0.5742], [0.4814, 0.6016], [0.4863, 0.6094], [0.4863, 0.6299], [0.5166, 0.6309], [0.5166, 0.6074], [0.5234, 0.6025], [0.5225, 0.5674], [0.5166, 0.5625], [0.5186, 0.543], [0.5225, 0.502], [0.5225, 0.4893]]),
-    "A Connector": radarPolygon([[0.5967, 0.3701], [0.6045, 0.3691], [0.6104, 0.3623], [0.6504, 0.3604], [0.6523, 0.3672], [0.6592, 0.3662], [0.6592, 0.3896], [0.6533, 0.3848], [0.6514, 0.3926], [0.6172, 0.3955], [0.6016, 0.3936], [0.5967, 0.3975]]),
-    Main: radarPolygon([[0.7617, 0.4688], [0.7783, 0.4707], [0.7793, 0.4756], [0.8213, 0.4746], [0.8633, 0.4316], [0.8633, 0.3721], [0.8564, 0.3711], [0.8555, 0.3516], [0.8203, 0.3506], [0.8213, 0.3711], [0.8145, 0.3711], [0.8145, 0.4004], [0.7881, 0.4023], [0.7881, 0.4102], [0.8018, 0.4102], [0.8018, 0.4492], [0.7803, 0.4492], [0.7627, 0.4502]]),
-    "A Site": radarPolygon([[0.7246, 0.2188], [0.709, 0.2266], [0.71, 0.2334], [0.707, 0.2393], [0.6992, 0.2412], [0.6934, 0.251], [0.6904, 0.2607], [0.6895, 0.2705], [0.6895, 0.2793], [0.6953, 0.291], [0.6914, 0.2949], [0.6875, 0.2988], [0.6875, 0.3047], [0.707, 0.3115], [0.7324, 0.3096], [0.75, 0.3066], [0.7607, 0.3018], [0.7695, 0.2939], [0.7793, 0.2822], [0.7793, 0.2676], [0.7822, 0.2568], [0.7617, 0.2246], [0.7432, 0.2246]]),
-    Heaven: radarPolygon([[0.2432, 0.6533], [0.2793, 0.6533], [0.2803, 0.6787], [0.3311, 0.7285], [0.3037, 0.7471], [0.2422, 0.6865]]),
-  },
-};
 
 function useI18n() {
   const context = useContext(LanguageContext);
@@ -927,7 +407,7 @@ function loadStoredSnapshot() {
   const fallback = createInitialAppData();
   const baseState = {
     teams: fallback.teams,
-    matchHistory: fallback.matchHistory,
+    matchHistory: typeof window === "undefined" ? fallback.matchHistory : restorePendingHistory(fallback.matchHistory, window.localStorage),
     activeView: "home",
     selectedTeamId: fallback.teams[0]?.id ?? null,
     currentMatch: null,
@@ -968,7 +448,7 @@ function loadStoredSnapshot() {
     const parsedVersion = Number(parsed.snapshotVersion ?? 0);
     const storedTeams = (Array.isArray(parsed.state?.teams) ? parsed.state.teams : parsed.teams ?? fallback.teams).map(normalizeTeam);
     const teams = shouldRefreshLegacySeeds(storedTeams) ? fallback.teams : storedTeams;
-    const matchHistory = sanitizeMatchHistory(parsed.state?.matchHistory ?? parsed.matchHistory ?? []);
+    const matchHistory = sanitizeMatchHistory(restorePendingHistory(parsed.state?.matchHistory ?? parsed.matchHistory ?? [], window.localStorage));
     const restoredSession =
       parsedVersion >= SNAPSHOT_VERSION ? sanitizeRestoredSession(parsed.state ?? {}) : sanitizeRestoredSession({});
     const siteMode = VALID_SITE_MODES.has(parsed.siteMode ?? null) ? parsed.siteMode ?? null : null;
@@ -1003,8 +483,9 @@ function loadStoredSnapshot() {
       soundDesignEnabled: parsed.soundDesignEnabled ?? false,
     };
   } catch {
-    window.localStorage.removeItem(STORAGE_KEY);
+    // Block automatic writes until the user explicitly resets the unreadable snapshot.
     return {
+      restoreFailed: true,
       state: baseState,
       setup: defaultSetup(fallback.teams),
       lastSavedAt: null,
@@ -1208,6 +689,7 @@ function App() {
   const [lastSavedAt, setLastSavedAt] = useState(initialSnapshot.lastSavedAt);
   const [language, setLanguage] = useState(initialSnapshot.language ?? "en");
   const [siteMode, setSiteMode] = useState(initialSnapshot.siteMode ?? null);
+  const [viewportNarrow, setViewportNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches);
   const [liveLayoutMode, setLiveLayoutMode] = useState(initialSnapshot.liveLayoutMode ?? "broadcast");
   const [livePresentationMode, setLivePresentationMode] = useState(initialSnapshot.livePresentationMode ?? "semi");
   const [livePlaybackRate, setLivePlaybackRate] = useState(initialSnapshot.livePlaybackRate ?? 1.25);
@@ -1218,6 +700,9 @@ function App() {
   );
   const [isNewTeam, setIsNewTeam] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [syncStatus, setSyncStatus] = useState({ state: LOCAL_PREVIEW ? "local" : "loading", pending: 0, error: null });
+  const [snapshotError, setSnapshotError] = useState(initialSnapshot.restoreFailed ? "restore" : null);
+  const [snapshotRetry, setSnapshotRetry] = useState(0);
   const [confirmState, setConfirmState] = useState(null);
   const [pendingImport, setPendingImport] = useState(null);
   const [historyFilters, setHistoryFilters] = useState(createArchiveFilters());
@@ -1225,8 +710,9 @@ function App() {
   const [roundProgress, setRoundProgress] = useState(0);
   const [selectedPlayerKey, setSelectedPlayerKey] = useState(null);
   const importInputRef = useRef(null);
-  const dbHydratedRef = useRef(false);
-  const dbSyncTimerRef = useRef(null);
+  const archiveSyncRef = useRef(null);
+  const historyRef = useRef(state.matchHistory);
+  historyRef.current = state.matchHistory;
   const liveMatchRef = useRef(state.currentMatch);
   const roundIntervalRef = useRef(null);
   const progressIntervalRef = useRef(null);
@@ -1237,8 +723,10 @@ function App() {
   const audioContextRef = useRef(null);
   const lastSoundCueRef = useRef(null);
   const t = (key) => (language === "ru" ? COPY_RU[key] : COPY[language]?.[key]) ?? COPY.en[key] ?? key;
+  const effectiveMobile = siteMode === "mobile" || (siteMode === null && viewportNarrow);
 
   const recoverFromRenderCrash = () => {
+    if (initialSnapshot.restoreFailed) { window.location.reload(); return; }
     try {
       const safeSnapshot = {
         snapshotVersion: SNAPSHOT_VERSION,
@@ -1263,7 +751,7 @@ function App() {
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSnapshot));
     } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
+      // Preserve the previous snapshot when recovery cannot be saved.
     }
     window.location.reload();
   };
@@ -1434,138 +922,45 @@ function App() {
     });
   }, [state.teams]);
 
-  useEffect(() => {
-    const serialized = JSON.stringify({
-      snapshotVersion: SNAPSHOT_VERSION,
-      state,
-      matchSetup,
-      language,
-      siteMode,
-      liveLayoutMode,
-      livePresentationMode,
-      livePlaybackRate,
-      soundDesignEnabled,
-      lastSavedAt: new Date().toISOString(),
-    });
-    // Persist to localStorage defensively — when the DB holds many matches the
-    // full snapshot can exceed the ~5MB localStorage quota. The DB is the
-    // authoritative store, so it is safe to skip/best-effort the local cache.
-    try {
-      window.localStorage.setItem(STORAGE_KEY, serialized);
-    } catch (quotaErr) {
-      // Try a trimmed snapshot (no matchHistory data) so UI prefs still persist.
-      try {
-        const trimmed = JSON.stringify({
-          snapshotVersion: SNAPSHOT_VERSION,
-          state: { ...state, matchHistory: [] },
-          matchSetup,
-          language,
-          siteMode,
-          liveLayoutMode,
-          livePresentationMode,
-          livePlaybackRate,
-          soundDesignEnabled,
-          lastSavedAt: new Date().toISOString(),
-        });
-        window.localStorage.setItem(STORAGE_KEY, trimmed);
-      } catch {
-        // give up silently — DB sync still works
-      }
-    }
-    setLastSavedAt(new Date().toISOString());
-  }, [state, matchSetup, language, siteMode, liveLayoutMode, livePresentationMode, livePlaybackRate, soundDesignEnabled]);
+  useEffect(() => { document.documentElement.lang = language; }, [language]);
 
-  // ---- Database hydration: load persisted matchHistory from the server ----
-  // Runs ONCE. Uses MERGE_HISTORY so local-only matches are preserved and
-  // then immediately force-synced to the DB one-by-one (avoids Vercel 4.5MB
-  // body limit that killed batched /api/sync calls with HTTP 413).
   useEffect(() => {
-    if (dbHydratedRef.current) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/matches", { cache: "no-store" });
-        if (!res.ok) {
-          dbHydratedRef.current = true;
-          return;
-        }
-        const data = await res.json();
-        const dbEntries = Array.isArray(data?.entries) ? data.entries : [];
-        if (cancelled) return;
-        const dbIds = new Set(dbEntries.map((e) => e?.id).filter(Boolean));
-        const localOnly = (state.matchHistory ?? []).filter(
-          (entry) => !dbIds.has(entry.id)
-        );
-        dispatch({ type: "MERGE_HISTORY", payload: dbEntries });
-        dbHydratedRef.current = true;
-        // Force-push any local-only matches to the server right now, ONE BY ONE.
-        if (localOnly.length > 0) {
-          console.log(`[db] force-syncing ${localOnly.length} local-only match(es) to DB`);
-          for (const entry of localOnly) {
-            if (!entry?.id) continue;
-            try {
-              const slim = slimEntryForSync(entry);
-              const payload = JSON.stringify({ entry: slim });
-              console.log(`[db] force-sync upsert ${entry.id} | payload ${payload.length} bytes`);
-              const r = await fetch("/api/matches", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: payload,
-              });
-              if (!r.ok) console.error(`[db] force-sync upsert failed for ${entry.id}: HTTP ${r.status}`);
-            } catch (e) {
-              console.error(`[db] force-sync error for ${entry.id}:`, e);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("DB hydration failed", err);
-        dbHydratedRef.current = true;
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => setViewportNarrow(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
   }, []);
 
-  // ---- Database sync: debounce-push matchHistory changes to the server ----
-  // We upsert matches ONE BY ONE to /api/matches. Each match's full data
-  // payload is 100-500KB, and Vercel serverless rejects request bodies larger
-  // than 4.5MB with HTTP 413. Individual POSTs stay well under the cap.
   useEffect(() => {
-    if (!dbHydratedRef.current) return;
-    window.clearTimeout(dbSyncTimerRef.current);
-    dbSyncTimerRef.current = window.setTimeout(async () => {
-      const entries = state.matchHistory ?? [];
-      if (entries.length === 0) return;
-      console.log(`[db] sync: upserting ${entries.length} match(es) one-by-one`);
-      let ok = 0;
-      let fail = 0;
-      for (const entry of entries) {
-        if (!entry?.id) continue;
-        try {
-          const slim = slimEntryForSync(entry);
-          const payload = JSON.stringify({ entry: slim });
-          const res = await fetch("/api/matches", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payload,
-          });
-          if (res.ok) ok += 1;
-          else {
-            fail += 1;
-            console.error(`[db] upsert failed for ${entry.id}: HTTP ${res.status} | payload was ${payload.length} bytes`);
-          }
-        } catch (err) {
-          fail += 1;
-          console.error(`[db] upsert error for ${entry.id}:`, err);
-        }
-      }
-      console.log(`[db] sync done — ok: ${ok}, failed: ${fail}`);
-    }, 900);
-    return () => window.clearTimeout(dbSyncTimerRef.current);
-  }, [state.matchHistory]);
+    const queue = createArchiveSync({
+      initialEntries: historyRef.current, storage: window.localStorage,
+      request: (...args) => fetch(...args), slim: slimEntryForSync,
+      onMerge: entries => dispatch({ type: "SET_HISTORY", payload: entries }),
+      onStatus: setSyncStatus, localOnly: LOCAL_PREVIEW,
+    });
+    archiveSyncRef.current = queue;
+    queue.start();
+    const online = () => queue.retry();
+    const changed = event => { if (event.key === OUTBOX_KEY) queue.refreshFromStorage(); };
+    window.addEventListener("online", online);
+    window.addEventListener("storage", changed);
+    return () => { queue.stop(); window.removeEventListener("online", online); window.removeEventListener("storage", changed); };
+  }, []);
+
+  useEffect(() => {
+    archiveSyncRef.current?.observe(state.matchHistory);
+    if (initialSnapshot.restoreFailed) return;
+    const savedAt = new Date().toISOString();
+    try {
+      const snapshot = { snapshotVersion: SNAPSHOT_VERSION, state: { ...state, currentMatch: null, matchHistory: state.matchHistory.map(slimEntryForSync), resultsData: state.resultsData ? slimEntryForSync({ data: state.resultsData }).data : null }, matchSetup, language, siteMode, liveLayoutMode, livePresentationMode, livePlaybackRate, soundDesignEnabled, lastSavedAt: savedAt };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      setLastSavedAt(savedAt);
+      setSnapshotError(null);
+    } catch {
+      setSnapshotError("storage");
+    }
+  }, [state, matchSetup, language, siteMode, liveLayoutMode, livePresentationMode, livePlaybackRate, soundDesignEnabled, initialSnapshot.restoreFailed, snapshotRetry]);
 
   // Debug: surface any uncaught render/runtime error to the console + window
   useEffect(() => {
@@ -1591,7 +986,7 @@ function App() {
     const phoneLiveMode =
       state.activeView === "live" &&
       state.currentMatch &&
-      (siteMode === "mobile" || liveLayoutMode === "phone");
+      (effectiveMobile || liveLayoutMode === "phone");
     document.documentElement.classList.toggle("phone-live", Boolean(phoneLiveMode));
     document.body.classList.toggle("phone-live", Boolean(phoneLiveMode));
 
@@ -1599,7 +994,7 @@ function App() {
       document.documentElement.classList.remove("phone-live");
       document.body.classList.remove("phone-live");
     };
-  }, [state.activeView, state.currentMatch, liveLayoutMode, siteMode]);
+  }, [state.activeView, state.currentMatch, liveLayoutMode, effectiveMobile]);
 
   useEffect(() => {
     if (!state.currentMatch || state.currentMatch.status !== "veto" || state.activeView !== "veto") {
@@ -1860,6 +1255,9 @@ function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
+      if (!parsed || Array.isArray(parsed) || !Array.isArray(parsed.teams) || !Array.isArray(parsed.matchHistory) || parsed.teams.some(team => !team || typeof team.name !== "string" || !Array.isArray(team.players) || team.players.length !== 5) || !validateImport(parsed.matchHistory).ok || parsed.matchHistory.some(entry => !isRenderableResultsData(entry.data))) {
+        throw new Error("Invalid simulator export");
+      }
       setPendingImport(parsed);
     } catch {
       pushToast("That JSON file could not be imported.", "error");
@@ -1869,7 +1267,7 @@ function App() {
   };
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, t }}>
+    <LanguageContext.Provider value={{ language, setLanguage, t, syncStatus, snapshotError, lastSavedAt, onRetrySync: () => { setSnapshotRetry(value => value + 1); archiveSyncRef.current?.retry(); }, onExport: handleExport, onImport: () => importInputRef.current?.click() }}>
       <AppErrorBoundary onRecover={recoverFromRenderCrash} onResetState={resetSavedState}>
         <div className="min-h-screen text-text">{renderApp()}</div>
       </AppErrorBoundary>
@@ -1892,12 +1290,12 @@ function App() {
           : state.activeView;
     const liveFocus = resolvedActiveView === "live" && resolvedCurrentMatch;
     const effectiveLiveLayout =
-      siteMode === "mobile"
+      effectiveMobile
         ? liveLayoutMode === "coach"
           ? "coach"
           : "phone"
         : liveLayoutMode;
-    const mobileSite = siteMode === "mobile";
+    const mobileSite = siteMode === "mobile" || (siteMode === null && viewportNarrow);
     const phoneLiveMode =
       liveFocus && (effectiveLiveLayout === "phone" || (mobileSite && effectiveLiveLayout === "coach"));
     return (
@@ -1919,6 +1317,7 @@ function App() {
               onSiteModeChange={handleSiteModeChange}
             />
           ))}
+        {!phoneLiveMode && <SyncBanner />}
         <div
           className={classNames(
             "mx-auto flex gap-6",
@@ -1940,6 +1339,7 @@ function App() {
                 onQuickStart={() => dispatch({ type: "NAVIGATE", payload: "match-setup" })}
                 onOpenTeams={() => dispatch({ type: "NAVIGATE", payload: "teams" })}
                 onOpenHistory={() => dispatch({ type: "NAVIGATE", payload: "history" })}
+                onOpenResult={entry => dispatch({ type: "VIEW_HISTORY_RESULT", payload: entry.data })}
               />
             )}
             {resolvedActiveView === "teams" && (
@@ -2104,12 +1504,17 @@ function App() {
         )}
         {pendingImport && (
           <ImportModal
+            counts={{ teams: pendingImport.teams.length, matches: pendingImport.matchHistory.length }}
             onMerge={() => {
+              archiveSyncRef.current?.allowRestore(pendingImport.matchHistory.map(entry => entry.id));
               dispatch({ type: "IMPORT_DATA", payload: { mode: "merge", data: pendingImport } });
               setPendingImport(null);
               pushToast("Data merged.");
             }}
             onReplace={() => {
+              try { window.localStorage.setItem(`${STORAGE_KEY}_before_import`, JSON.stringify({ teams: state.teams, matchHistory: state.matchHistory.map(slimEntryForSync) })); }
+              catch { pushToast(language === "ru" ? "Не удалось создать резервную копию. Освободи место или экспортируй данные." : "Backup failed. Free storage or export your data first.", "error"); return; }
+              archiveSyncRef.current?.allowRestore(pendingImport.matchHistory.map(entry => entry.id));
               dispatch({ type: "IMPORT_DATA", payload: { mode: "replace", data: pendingImport } });
               setPendingImport(null);
               pushToast("Data replaced.");
@@ -2124,13 +1529,7 @@ function App() {
             onClose={() => setSelectedPlayerKey(null)}
           />
         )}
-        {!siteMode && (
-          <SiteModeModal
-            onChoose={(mode) => {
-              handleSiteModeChange(mode);
-            }}
-          />
-        )}
+        {/* Layout follows the viewport by default; the header keeps the manual override. */}
       </div>
     );
   }
@@ -2212,267 +1611,7 @@ function roundMetric(value, digits = 0) {
   return Math.round(value * factor) / factor;
 }
 
-function normalizeRadarLookupKey(value) {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
 
-function pointInPolygon(point, polygon) {
-  let inside = false;
-
-  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
-    const [xi, yi] = polygon[index];
-    const [xj, yj] = polygon[previous];
-    const intersects =
-      yi > point[1] !== yj > point[1] &&
-      point[0] < ((xj - xi) * (point[1] - yi)) / ((yj - yi) || 0.000001) + xi;
-
-    if (intersects) {
-      inside = !inside;
-    }
-  }
-
-  return inside;
-}
-
-function polygonBounds(polygon) {
-  return polygon.reduce(
-    (bounds, [x, y]) => ({
-      minX: Math.min(bounds.minX, x),
-      maxX: Math.max(bounds.maxX, x),
-      minY: Math.min(bounds.minY, y),
-      maxY: Math.max(bounds.maxY, y),
-    }),
-    { minX: 1, maxX: 0, minY: 1, maxY: 0 }
-  );
-}
-
-function polygonCentroid(polygon) {
-  if (!polygon?.length) {
-    return [0.5, 0.5];
-  }
-
-  const [sumX, sumY] = polygon.reduce(
-    (totals, [x, y]) => [totals[0] + x, totals[1] + y],
-    [0, 0]
-  );
-
-  return [sumX / polygon.length, sumY / polygon.length];
-}
-
-function resolveRadarPosition(mapName, zone, site) {
-  const normalizedZone = normalizeRadarLookupKey(zone);
-  const normalizedSite = normalizeRadarLookupKey(site);
-  const siteScopedKey = normalizedZone && normalizedSite ? `${normalizedZone}::${normalizedSite}` : "";
-  const polygonAliases = RADAR_ZONE_ALIASES[mapName] ?? {};
-  const polygonMap = RADAR_ZONE_POLYGONS[mapName] ?? {};
-
-  const polygonLabel =
-    (siteScopedKey && polygonAliases[siteScopedKey]) ||
-    polygonAliases[normalizedZone] ||
-    (normalizedSite && polygonAliases[`site::${normalizedSite}`]) ||
-    null;
-
-  if (polygonLabel && polygonMap[polygonLabel]) {
-    return polygonMap[polygonLabel];
-  }
-
-  const mapZones = RADAR_ZONE_POSITIONS[mapName] ?? {};
-  const normalizedZoneEntries = Object.fromEntries(
-    Object.entries(mapZones).map(([key, value]) => [normalizeRadarLookupKey(key), value])
-  );
-
-  if (normalizedZone) {
-    if (siteScopedKey && normalizedZoneEntries[siteScopedKey]) {
-      return normalizedZoneEntries[siteScopedKey];
-    }
-    if (normalizedZoneEntries[normalizedZone]) {
-      return normalizedZoneEntries[normalizedZone];
-    }
-  }
-
-  return RADAR_SITE_FALLBACKS[mapName]?.[site] ?? { x: 0.5, y: 0.5, level: "upper" };
-}
-
-function resolveRadarZoneLabel(mapName, zone, site) {
-  const normalizedZone = normalizeRadarLookupKey(zone);
-  const normalizedSite = normalizeRadarLookupKey(site);
-  const siteScopedKey = normalizedZone && normalizedSite ? `${normalizedZone}::${normalizedSite}` : "";
-  const aliasMap = RADAR_ZONE_ALIASES[mapName] ?? {};
-  return (
-    (siteScopedKey && aliasMap[siteScopedKey]) ||
-    aliasMap[normalizedZone] ||
-    (normalizedSite && aliasMap[`site::${normalizedSite}`]) ||
-    zone ||
-    site ||
-    "unknown"
-  );
-}
-
-function getRadarViewBox(mapName, level = "upper") {
-  return RADAR_VIEWBOXES[mapName]?.[level] ?? { left: 0, top: 0, width: 1, height: 1 };
-}
-
-function hashRadarSeed(value = "") {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function seededRadarUnit(seed, salt = 0) {
-  const hash = hashRadarSeed(`${seed}:${salt}`);
-  return (hash % 10000) / 9999;
-}
-
-function spawnInRadarRegion(region, seed, mapName) {
-  const level = region.level ?? "upper";
-  const viewBox = getRadarViewBox(mapName, level);
-  if (region.polygon?.length) {
-    const polygon = region.polygon;
-    const bounds = polygonBounds(polygon);
-    let sampledPoint = null;
-
-    for (let attempt = 0; attempt < 24; attempt += 1) {
-      const sample = [
-        bounds.minX + seededRadarUnit(seed, attempt * 2 + 1) * Math.max(0.0001, bounds.maxX - bounds.minX),
-        bounds.minY + seededRadarUnit(seed, attempt * 2 + 2) * Math.max(0.0001, bounds.maxY - bounds.minY),
-      ];
-
-      if (pointInPolygon(sample, polygon)) {
-        sampledPoint = sample;
-        break;
-      }
-    }
-
-    const [localX, localY] = sampledPoint ?? polygonCentroid(polygon);
-    const x =
-      region.space === "absolute"
-        ? localX
-        : viewBox.left + clamp(localX, 0.02, 0.98) * viewBox.width;
-    const y =
-      region.space === "absolute"
-        ? localY
-        : viewBox.top + clamp(localY, 0.02, 0.98) * viewBox.height;
-
-    return {
-      ...region,
-      x: clamp(x, 0.02, 0.98),
-      y: clamp(y, 0.02, 0.98),
-    };
-  }
-
-  const anchorIndex = region.anchors?.length
-    ? Math.min(region.anchors.length - 1, Math.floor(seededRadarUnit(seed, 0) * region.anchors.length))
-    : -1;
-  const anchor = anchorIndex >= 0 ? region.anchors[anchorIndex] : [region.x, region.y];
-  const localWidth = (region.anchors ? region.radius ?? 0.022 : region.width ?? 0.06) * (region.anchors ? 0.36 : 0.62);
-  const localHeight = (region.anchors ? region.radius ?? 0.022 : region.height ?? 0.06) * (region.anchors ? 0.36 : 0.62);
-  const localX = anchor[0] - localWidth / 2 + seededRadarUnit(seed, 1) * localWidth;
-  const localY = anchor[1] - localHeight / 2 + seededRadarUnit(seed, 2) * localHeight;
-  const x =
-    region.space === "absolute"
-      ? localX
-      : viewBox.left + clamp(localX, 0.02, 0.98) * viewBox.width;
-  const y =
-    region.space === "absolute"
-      ? localY
-      : viewBox.top + clamp(localY, 0.02, 0.98) * viewBox.height;
-  return {
-    ...region,
-    x: clamp(x, 0.02, 0.98),
-    y: clamp(y, 0.02, 0.98),
-  };
-}
-
-function separateRadarMarker(position, priorMarkers, seed, mapName) {
-  const level = position.level ?? "upper";
-  const relevantMarkers = priorMarkers.filter(
-    (marker) => marker.level === level && marker.zone === position.zone
-  );
-
-  if (!relevantMarkers.length) {
-    return position;
-  }
-
-  const viewBox = getRadarViewBox(mapName, level);
-  const minDistance = level === "lower" ? 0.017 : 0.024;
-
-  const isFarEnough = (candidate) =>
-    relevantMarkers.every((marker) => Math.hypot(candidate.x - marker.x, candidate.y - marker.y) >= minDistance);
-
-  if (isFarEnough(position)) {
-    return position;
-  }
-
-  for (let attempt = 0; attempt < 16; attempt += 1) {
-    const candidate = spawnInRadarRegion(position, `${seed}:retry:${attempt}`, mapName);
-    if (isFarEnough(candidate)) {
-      return {
-        ...position,
-        x: clamp(candidate.x, viewBox.left + 0.015 * viewBox.width, viewBox.left + 0.985 * viewBox.width),
-        y: clamp(candidate.y, viewBox.top + 0.015 * viewBox.height, viewBox.top + 0.985 * viewBox.height),
-      };
-    }
-  }
-
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const angle = seededRadarUnit(seed, 50 + attempt * 2) * Math.PI * 2;
-    const distance = minDistance * (0.55 + seededRadarUnit(seed, 51 + attempt * 2) * 0.45);
-    const candidate = {
-      ...position,
-      x: clamp(position.x + Math.cos(angle) * distance, viewBox.left + 0.015 * viewBox.width, viewBox.left + 0.985 * viewBox.width),
-      y: clamp(position.y + Math.sin(angle) * distance, viewBox.top + 0.015 * viewBox.height, viewBox.top + 0.985 * viewBox.height),
-    };
-    if (isFarEnough(candidate)) {
-      return candidate;
-    }
-  }
-
-  return position;
-}
-
-function buildRadarMarkers(events = [], mapName) {
-  const placedMarkers = [];
-  const kills = events
-    .filter((event) => event.kind === "kill")
-    .map((event, index, source) => {
-      const position = spawnInRadarRegion(
-        resolveRadarPosition(mapName, event.zone, event.site),
-        `${mapName}:${event.zone ?? event.site ?? "unknown"}:${event.id}:${index}`,
-        mapName
-      );
-      const separated = separateRadarMarker(
-        {
-          ...position,
-          zone: event.zone,
-        },
-        placedMarkers,
-        `${event.id}:${event.zone ?? "zone"}:${index}`,
-        mapName
-      );
-      const marker = {
-        id: `${event.id}_${index}`,
-        x: separated.x,
-        y: separated.y,
-        level: separated.level ?? "upper",
-        zone: event.zone,
-        zoneLabel: resolveRadarZoneLabel(mapName, event.zone, event.site),
-        site: event.site,
-        victimTeamKey: event.victimTeamKey,
-        victimSide: event.victimSide,
-        clock: event.clock,
-        label: event.label,
-        openingKill: event.openingKill,
-        recent: index === source.length - 1,
-      };
-      placedMarkers.push(marker);
-      return marker;
-    });
-
-  return kills;
-}
 
 function weaponExpectancyWeight(weaponType) {
   switch (weaponType) {
@@ -2661,17 +1800,19 @@ function buildHeatmapClusters(map, sideFilter = "all") {
   const markers = buildRadarMarkers(
     map.rounds.flatMap((round) => round.timeline ?? []),
     map.mapName
-  ).filter((marker) => sideFilter === "all" || marker.victimSide === sideFilter);
+  ).filter((marker) => marker.positioned !== false && Number.isFinite(marker.x) && Number.isFinite(marker.y) && (sideFilter === "all" || marker.victimSide === sideFilter));
 
   const grouped = {};
   markers.forEach((marker) => {
     const zoneKey = normalizeRadarLookupKey(marker.zone ?? marker.site ?? "unknown");
-    const key = `${marker.level}:${zoneKey}:${marker.victimSide ?? "UNK"}`;
+    const key = `${marker.level}:${zoneKey}:${marker.site ?? "unknown"}:${marker.victimSide ?? "UNK"}`;
     grouped[key] ??= {
       id: key,
       level: marker.level,
       side: marker.victimSide ?? "UNK",
       zone: marker.zone ?? marker.site ?? "unknown",
+      region: resolveRadarPosition(map.mapName, marker.zone, marker.site),
+      points: [],
       x: 0,
       y: 0,
       count: 0,
@@ -2680,16 +1821,16 @@ function buildHeatmapClusters(map, sideFilter = "all") {
     grouped[key].x += marker.x;
     grouped[key].y += marker.y;
     grouped[key].count += 1;
+    grouped[key].points.push([marker.x, marker.y]);
     grouped[key].labels.push(marker.label);
   });
 
   return Object.values(grouped)
-    .map((cluster) => ({
-      ...cluster,
-      x: cluster.x / Math.max(1, cluster.count),
-      y: cluster.y / Math.max(1, cluster.count),
-      title: `${cluster.zone} · ${cluster.count} kills`,
-    }))
+    .map((cluster) => {
+      const center = [cluster.x / cluster.count, cluster.y / cluster.count];
+      const point = isRadarPointInRegion(center, cluster.region, map.mapName) ? center : cluster.points.reduce((nearest, candidate) => Math.hypot(candidate[0] - center[0], candidate[1] - center[1]) < Math.hypot(nearest[0] - center[0], nearest[1] - center[1]) ? candidate : nearest);
+      return { ...cluster, x: point[0], y: point[1], title: `${cluster.zone} · ${cluster.count} deaths (approximate)` };
+    })
     .sort((left, right) => right.count - left.count);
 }
 
@@ -2893,13 +2034,17 @@ function useIsLandscape(enabled = true) {
   return isLandscape;
 }
 
+function MetricCard({ icon: Icon, label, value, tone = "default" }) {
+  return <div className={classNames("rounded-lg border border-border bg-card/60 p-4", tone === "accent" && "border-accent/40")}><div className="mb-2 flex items-center gap-2 text-xs text-muted"><Icon size={15}/><span>{label}</span></div><div className="font-display text-3xl font-semibold text-text">{value}</div></div>;
+}
+
 function Panel({ title, subtitle, action, children, className = "", headerClassName = "" }) {
   return (
-    <section className={classNames("panel page-enter rounded-2xl p-5", className)}>
+    <section className={classNames("panel rounded-xl p-5", className)}>
       {(title || subtitle || action) && (
-        <div className={classNames("mb-4 flex items-start justify-between gap-4", headerClassName)}>
+        <div className={classNames("mb-4 flex flex-wrap items-start justify-between gap-4", headerClassName)}>
           <div>
-            {title && <h2 className="font-display text-2xl font-semibold tracking-wide text-text">{title}</h2>}
+            {title && <h2 className="font-display text-xl font-semibold text-text">{title}</h2>}
             {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
           </div>
           {action}
@@ -2910,286 +2055,73 @@ function Panel({ title, subtitle, action, children, className = "", headerClassN
   );
 }
 
+function SyncBanner() {
+  const { language, syncStatus, snapshotError, lastSavedAt, onRetrySync, onExport, onImport } = useI18n();
+  const ru = language === "ru";
+  const labels = ru ? { loading: "Загрузка архива", pending: "Ожидает отправки", syncing: "Синхронизация с Neon", synced: "Архив сохранён в Neon", local: "Локальная проверка: Neon отключена", error: "Не удалось синхронизировать архив" } : { loading: "Loading archive", pending: "Waiting to sync", syncing: "Syncing with Neon", synced: "Archive saved to Neon", local: "Local preview: Neon disconnected", error: "Archive sync failed" };
+  const failed = Boolean(snapshotError || syncStatus.error || syncStatus.storageFailed);
+  return <div className="sync-banner" data-error={failed}><div role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-2">{failed ? <AlertTriangle size={14}/> : <Save size={14}/>}<span>{snapshotError === "restore" ? (ru ? "Не удалось прочитать локальные данные; исходная копия сохранена без изменений." : "Local data could not be read; the original snapshot has been preserved.") : snapshotError || syncStatus.storageFailed ? (ru ? "Не удалось сохранить данные на устройстве. Экспортируй данные перед выходом." : "Could not save data on this device. Export your data before leaving.") : labels[syncStatus.state]}</span>{syncStatus.pending > 0 && <span className="text-muted">({syncStatus.pending})</span>}{lastSavedAt && !failed && <span className="hidden text-muted sm:inline">{ru ? "На устройстве" : "On device"}: {new Date(lastSavedAt).toLocaleTimeString(ru ? "ru-RU" : "en-GB", { hour: "2-digit", minute: "2-digit" })}</span>}</div><div className="flex items-center gap-2">{failed && <button type="button" onClick={onRetrySync} className="quiet-action">{ru ? "Повторить" : "Retry"}</button>}<button type="button" onClick={onExport} className="quiet-action"><Download size={14}/>{ru ? "Экспорт" : "Export"}</button><button type="button" onClick={onImport} className="quiet-action"><Upload size={14}/>{ru ? "Импорт" : "Import"}</button></div></div>;
+}
+
 function TopNav({ activeView, onNavigate, siteMode, onSiteModeChange }) {
   const { language, setLanguage, t } = useI18n();
-  const navLabels = {
-    home: t("nav_home"),
-    teams: t("nav_teams"),
-    "match-setup": t("nav_match_setup"),
-    live: t("nav_live"),
-    results: t("nav_results"),
-    history: t("nav_history"),
-    stats: t("nav_stats"),
-  };
-  return (
-    <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md">
-      <div className="mx-auto flex w-[min(1600px,98vw)] items-center justify-between gap-4 px-3 py-3 sm:px-4 sm:py-4">
-        <div>
-          <div className="font-display text-[10px] uppercase tracking-[0.3em] text-accent sm:text-xs sm:tracking-[0.35em]">{t("app_title")}</div>
-          <div className="font-display text-lg font-semibold text-text sm:text-2xl">{t("app_tagline")}</div>
-        </div>
-        <div className="flex min-w-0 items-center gap-3">
-          <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
-          <div className="flex items-center gap-2 rounded-xl border border-border bg-card/70 p-1">
-            <span className="hidden px-2 text-xs uppercase tracking-[0.2em] text-muted sm:inline">{t("language")}</span>
-            {["en", "ru"].map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => setLanguage(lang)}
-                className={classNames(
-                  "rounded-lg px-2.5 py-1 text-xs uppercase tracking-[0.18em] sm:px-3",
-                  language === lang ? "bg-accent/15 text-accent" : "text-muted"
-                )}
-              >
-                {lang}
-              </button>
-            ))}
-          </div>
-          <nav className="flex min-w-0 items-center gap-2 overflow-x-auto">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = activeView === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onNavigate(item.id)}
-                className={classNames(
-                  "flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm transition sm:px-4",
-                  active
-                    ? "border-accent bg-accent/10 text-accent shadow-glow"
-                    : "border-border bg-card/70 text-muted hover:border-accent/50 hover:text-text"
-                )}
-              >
-                <Icon size={16} />
-                <span className="hidden font-display text-lg md:inline">{navLabels[item.id] ?? item.label}</span>
-              </button>
-            );
-          })}
-          </nav>
-        </div>
-      </div>
-    </header>
-  );
+  return <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur-md"><div className="mx-auto flex max-w-[1760px] flex-wrap items-center gap-4 px-5 py-3"><button type="button" onClick={() => onNavigate("home")} className="flex shrink-0 items-center gap-3" aria-label={t("nav_home")}><span className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-bg"><Crosshair size={23}/></span><span className="text-left"><span className="block font-display text-lg font-semibold">CS2 Match Desk</span><span className="block text-xs text-muted">{language === "ru" ? "Каждый раунд имеет значение" : "Every round matters"}</span></span></button><nav aria-label={language === "ru" ? "Основная навигация" : "Main navigation"} className="desk-nav flex-1">{NAV_ITEMS.map(item => { const Icon = item.icon; return <button type="button" key={item.id} onClick={() => onNavigate(item.id)} aria-current={activeView === item.id || (activeView === "veto" && item.id === "match-setup") ? "page" : undefined} aria-label={t("nav_" + item.id.replaceAll("-", "_"))}><Icon size={17}/><span>{t("nav_" + item.id.replaceAll("-", "_"))}</span></button>; })}</nav><div className="flex items-center gap-3"><SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact/><button type="button" className="quiet-action" onClick={() => setLanguage(language === "ru" ? "en" : "ru")} aria-label={language === "ru" ? "Switch to English" : "Переключить на русский"}>{language.toUpperCase()}</button></div></div></header>;
 }
 
 function MobileHeader({ activeView, siteMode, onSiteModeChange, language, onLanguageChange }) {
   const { t } = useI18n();
-  const currentNav = NAV_ITEMS.find((item) => item.id === activeView);
-
-  return (
-    <header className="sticky top-0 z-30 border-b border-border bg-surface/90 backdrop-blur-md">
-      <div className="flex items-center justify-between gap-3 px-3 py-3">
-        <div className="min-w-0">
-          <div className="font-display text-[10px] uppercase tracking-[0.28em] text-accent">{t("app_title")}</div>
-          <div className="truncate font-display text-xl text-text">{currentNav?.label ?? t("nav_home")}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact />
-          <div className="flex items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
-            {["en", "ru"].map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => onLanguageChange(lang)}
-                className={classNames(
-                  "rounded-lg px-2 py-1 text-[11px] uppercase tracking-[0.14em]",
-                  language === lang ? "bg-accent/10 text-accent" : "text-muted"
-                )}
-              >
-                {lang}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </header>
-  );
+  const nav = activeView === "veto" ? "match-setup" : activeView;
+  return <header className="sticky top-0 z-30 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur-md"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><div className="text-xs text-muted">CS2 Match Desk</div><div className="truncate font-display text-xl font-semibold">{t("nav_" + nav.replaceAll("-", "_"))}</div></div><div className="flex items-center gap-2"><SiteModeSwitch siteMode={siteMode} onChange={onSiteModeChange} compact/><button type="button" onClick={() => onLanguageChange(language === "ru" ? "en" : "ru")} className="quiet-action" aria-label={language === "ru" ? "Switch to English" : "Переключить на русский"}>{language.toUpperCase()}</button></div></div></header>;
 }
 
 function MobileBottomNav({ activeView, onNavigate }) {
-  return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface/95 px-2 py-2 backdrop-blur-md">
-      <div className="grid grid-cols-6 gap-1">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const active = activeView === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onNavigate(item.id)}
-              className={classNames(
-                "flex flex-col items-center justify-center rounded-xl px-1 py-2 text-[10px]",
-                active ? "bg-accent/10 text-accent" : "text-muted"
-              )}
-            >
-              <Icon size={16} />
-              <span className="mt-1">{item.label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
-  );
+  const { t, language } = useI18n();
+  const [more, setMore] = useState(false);
+  const primary = NAV_ITEMS.filter(item => ["home", "teams", "match-setup", "history"].includes(item.id));
+  return <><nav aria-label={language === "ru" ? "Основная навигация" : "Main navigation"} className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 px-2 pt-2 backdrop-blur-md" style={{ paddingBottom: "max(.5rem, env(safe-area-inset-bottom))" }}><div className="grid grid-cols-5 gap-1">{primary.map(item => { const Icon = item.icon; return <button type="button" key={item.id} onClick={() => onNavigate(item.id)} aria-current={activeView === item.id ? "page" : undefined} className={classNames("flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg p-1 text-[11px]", activeView === item.id ? "bg-card text-accent" : "text-muted")}><Icon size={18}/><span>{t("nav_" + item.id.replaceAll("-", "_"))}</span></button>; })}<button type="button" aria-haspopup="dialog" onClick={() => setMore(true)} className="flex min-h-12 flex-col items-center justify-center gap-1 text-[11px] text-muted"><Plus size={18}/>{language === "ru" ? "Ещё" : "More"}</button></div></nav><Dialog open={more} onOpenChange={setMore}><DialogContent><DialogHeader><DialogTitle>{language === "ru" ? "Разделы" : "More sections"}</DialogTitle><DialogDescription>{language === "ru" ? "Трансляция, результаты и статистика" : "Live match, results and statistics"}</DialogDescription></DialogHeader><div className="grid gap-2">{NAV_ITEMS.filter(item => !primary.includes(item)).map(item => { const Icon = item.icon; return <button key={item.id} type="button" onClick={() => { onNavigate(item.id); setMore(false); }} className="flex items-center gap-3 rounded-lg border border-border p-4 text-left"><Icon size={20}/>{t("nav_" + item.id.replaceAll("-", "_"))}</button>; })}</div></DialogContent></Dialog></>;
 }
 
-function SiteModeModal({ onChoose }) {
-  const isMobileSuggested =
-    typeof window !== "undefined" ? window.matchMedia("(max-width: 1024px)").matches : false;
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="panel w-full max-w-2xl rounded-3xl p-6 sm:p-8">
-        <div className="text-xs uppercase tracking-[0.28em] text-accent">Version Select</div>
-        <h2 className="mt-3 font-display text-4xl text-text">Choose how the site should open</h2>
-        <p className="mt-3 text-sm text-muted">
-          Desktop keeps the full broadcast layout. Mobile switches the whole site to a phone-first shell with simplified navigation and a mobile live HUD.
-        </p>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => onChoose("desktop")}
-            className="rounded-3xl border border-border bg-card/70 p-5 text-left transition hover:border-accent/35"
-          >
-            <div className="font-display text-3xl text-text">Desktop</div>
-            <div className="mt-2 text-sm text-muted">
-              Wide layout, full tables, broadcast HUD, best for PC and tablet landscape.
-            </div>
-            {isMobileSuggested ? null : (
-              <div className="mt-4 inline-flex rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs text-accent">
-                Recommended
-              </div>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => onChoose("mobile")}
-            className="rounded-3xl border border-border bg-card/70 p-5 text-left transition hover:border-accent/35"
-          >
-            <div className="font-display text-3xl text-text">Mobile</div>
-            <div className="mt-2 text-sm text-muted">
-              Compact phone-first navigation, adapted content flow, and a dedicated mobile live screen.
-            </div>
-            {isMobileSuggested ? (
-              <div className="mt-4 inline-flex rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs text-accent">
-                Recommended
-              </div>
-            ) : null}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function MetricCard({ icon: Icon, label, value, tone = "default" }) {
-  return (
-    <div
-      className={classNames(
-        "rounded-2xl border p-4",
-        tone === "accent"
-          ? "border-accent/40 bg-accent/8"
-          : tone === "danger"
-            ? "border-red-500/40 bg-red-500/10"
-            : "border-border bg-card/70"
-      )}
-    >
-      <div className="mb-2 flex items-center gap-2 text-muted">
-        <Icon size={16} />
-        <span className="text-xs uppercase tracking-[0.2em]">{label}</span>
-      </div>
-      <div className="font-display text-4xl font-semibold text-text">{value}</div>
-    </div>
-  );
-}
-
-function HomeView({ teams, history, mobile = false, onQuickStart, onOpenTeams, onOpenHistory }) {
-  const { t } = useI18n();
-  const topTeams = [...teams].sort((left, right) => getTeamStrength(right) - getTeamStrength(left)).slice(0, 3);
+function HomeView({ teams, history, mobile = false, onQuickStart, onOpenTeams, onOpenHistory, onOpenResult }) {
+  const { language } = useI18n();
+  const ru = language === "ru";
+  const topTeams = [...teams].sort((a, b) => getTeamStrength(b) - getTeamStrength(a)).slice(0, 4);
+  const contenders = topTeams.slice(0, 2);
   return (
     <div className="space-y-6">
-      <Panel
-        title={t("dashboard")}
-        subtitle="Seeded teams, live match control, history replay, and full local export/import."
-        action={
-          <button
-            type="button"
-            onClick={onQuickStart}
-            className="flex items-center gap-2 rounded-xl border border-accent bg-accent/10 px-4 py-2 text-sm text-accent transition hover:bg-accent/15"
-          >
-            <Play size={16} />
-            {t("quick_start")}
-          </button>
-        }
-      >
-        <div className={classNames("grid gap-4", mobile ? "grid-cols-2" : "grid-cols-4")}>
-          <MetricCard icon={Users} label="Saved Teams" value={teams.length} tone="accent" />
-          <MetricCard icon={History} label="Stored Matches" value={history.length} />
-          <MetricCard icon={Trophy} label="Formats" value={MATCH_FORMATS.join(" / ")} />
-          <MetricCard icon={Sparkles} label="Map Pool" value={MAP_POOL.length} />
+      <section className="match-desk overflow-hidden rounded-2xl border border-border">
+        <div className="match-desk-heading flex flex-wrap items-start justify-between gap-4 p-5 sm:p-8">
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-sm text-muted"><Crosshair size={16} />{ru ? "Матч-центр" : "Match centre"}</div>
+            <h1 className="font-display text-4xl font-semibold leading-tight sm:text-5xl">{ru ? "Следующая серия — твоя." : "Your next series starts here."}</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-muted">{ru ? "Собери составы, проведи veto и проследи за каждым раундом. От первой пистолетки до последнего клатча." : "Build your lineups, run the veto and follow every round. From the opening pistol to the final clutch."}</p>
+          </div>
+          <span className="rounded-full border border-border px-3 py-1 text-xs text-muted">MR12 · BO1 / BO3 / BO5</span>
         </div>
-      </Panel>
-      <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1.3fr_0.7fr]")}>
-        <Panel
-          title={t("top_teams")}
-          subtitle="Composite strength mixes player ratings with coach influence."
-          action={
-            <button type="button" onClick={onOpenTeams} className="text-sm text-accent hover:text-accent/80">
-              {t("open_team_manager_short")}
-            </button>
-          }
-        >
-          <div className="space-y-4">
-            {topTeams.map((team) => (
-              <div key={team.id} className="flex items-center justify-between rounded-2xl border border-border bg-card/60 p-4">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-surface">
-                    {renderLogo(team.logo)}
-                  </div>
-                  <div>
-                    <div className="font-display text-2xl font-semibold text-text">
-                      {team.name} <span className="text-sm text-muted">[{team.tag}]</span>
-                    </div>
-                    <div className="text-sm text-muted">
-                      {team.region} · Coach {team.coach.nickname} · Captain{" "}
-                      {team.players.find((player) => player.isCaptain)?.nickname}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="numbers text-2xl">{getTeamStrength(team)}</div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-muted">Team Strength</div>
-                </div>
-              </div>
-            ))}
+        <div className="grid items-center gap-5 px-5 py-6 sm:grid-cols-[1fr_auto_1fr] sm:px-8">
+          {contenders.length < 2 ? <p className="text-muted">{ru ? "Создай две команды, чтобы начать серию." : "Create two teams to start a series."}</p> : contenders.map((team, index) => (
+            <div key={team.id} className={classNames("flex min-w-0 items-center gap-4", index === 1 && "sm:col-start-3")}>
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-border bg-surface">{renderLogo(team.logo, team.tag?.slice(0, 2))}</div>
+              <div className="min-w-0"><div className="text-sm text-muted">{team.region} / {team.tag}</div><div className="truncate font-display text-3xl font-semibold">{team.name}</div><div className="mt-1 text-xs text-muted">{team.players.length} {ru ? "игроков" : "players"} · {ru ? "сила" : "strength"} {getTeamStrength(team)}</div></div>
+              {index === 0 && <span className="hidden text-2xl text-muted sm:absolute sm:left-1/2 sm:block sm:-translate-x-1/2" aria-hidden="true">vs</span>}
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border bg-surface/70 px-5 py-5 sm:px-8">
+          <div className="flex items-center gap-2 text-sm text-muted"><Shield size={16} />{ru ? "Экономика, тактика и форма решают вместе" : "Economy, tactics and form all play a part"}</div>
+          <button type="button" onClick={contenders.length < 2 ? onOpenTeams : onQuickStart} className="primary-action"><Play size={17} />{contenders.length < 2 ? (ru ? "Создать команды" : "Build teams") : (ru ? "Настроить матч" : "Set up a match")}</button>
+        </div>
+      </section>
+      <div className={classNames("grid gap-6", !mobile && "lg:grid-cols-[1fr_1.1fr]")}>
+        <Panel title={ru ? "Команды в игре" : "The contenders"} subtitle={ru ? "Твои составы, отсортированные по силе" : "Your lineups, ranked by strength"} action={<button type="button" onClick={onOpenTeams} className="quiet-action">{ru ? "Управление" : "Manage"}<Users size={16} /></button>}>
+          <div className="divide-y divide-border">
+            {topTeams.map((team, index) => <div key={team.id} className="flex items-center gap-3 py-4"><span className="w-5 text-sm text-muted">{index + 1}</span><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface">{renderLogo(team.logo, team.tag)}</div><div className="min-w-0 flex-1"><div className="truncate font-semibold">{team.name}</div><div className="text-xs text-muted">{team.players.find(p => p.isCaptain)?.nickname ?? team.coach.nickname} · {team.region}</div></div><span className="numbers text-xl">{getTeamStrength(team)}</span></div>)}
+            {!topTeams.length && <p className="py-6 text-sm text-muted">{ru ? "Добавь первый состав в менеджере команд." : "Add your first lineup in team management."}</p>}
           </div>
         </Panel>
-        <Panel
-          title={t("recent_results")}
-          subtitle="Replay any stored series from the history tab."
-          action={
-            <button type="button" onClick={onOpenHistory} className="text-sm text-accent hover:text-accent/80">
-              {t("open_history")}
-            </button>
-          }
-        >
-          <div className="space-y-3">
-            {history.length === 0 && <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted">No saved matches yet.</div>}
-            {history.slice(0, 5).map((entry) => (
-              <div key={entry.id} className="rounded-xl border border-border bg-card/60 p-4">
-                <div className="font-display text-xl text-text">{entry.teams}</div>
-                <div className="mt-1 flex items-center justify-between text-sm text-muted">
-                  <span>{new Date(entry.date).toLocaleString()}</span>
-                  <span className="numbers">{entry.score}</span>
-                </div>
-                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-muted">
-                  MVP {entry.mvp} · {entry.mapsPlayed}
-                </div>
-              </div>
-            ))}
-          </div>
+        <Panel title={ru ? "Последние серии" : "Recent series"} subtitle={ru ? "Результаты и разбор сыгранных матчей" : "Results and analysis from your archive"} action={<button type="button" onClick={onOpenHistory} className="quiet-action"><History size={16} />{ru ? "Весь архив" : "All matches"}</button>}>
+          {!history.length ? <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-6 text-center"><Trophy size={30} className="text-muted"/><div className="font-semibold">{ru ? "Первая серия ещё впереди" : "The first series is still to come"}</div><p className="max-w-xs text-sm text-muted">{ru ? "Заверши матч — здесь появятся счёт, MVP и подробная статистика." : "Finish a match to see its score, MVP and detailed statistics here."}</p></div> : <div className="divide-y divide-border">{history.slice(0, 5).map(entry => <button type="button" key={entry.id} onClick={() => onOpenResult?.(entry)} className="match-result-row"><div className="min-w-0"><div className="truncate font-semibold">{entry.teams}</div><div className="mt-1 text-xs text-muted">{new Date(entry.date).toLocaleDateString(ru ? "ru-RU" : "en-GB")} · {entry.data?.format ?? "BO3"} · MVP {entry.mvp}</div></div><span className="numbers shrink-0 text-2xl">{entry.score}</span></button>)}</div>}
         </Panel>
       </div>
     </div>
@@ -3274,7 +2206,7 @@ function SideRail({ selectedTeam, currentMatch, lastSavedAt, onExport, onImport 
 
 function ToastStack({ toasts, onDismiss }) {
   return (
-    <div className="fixed right-4 top-20 z-50 flex w-[360px] flex-col gap-3">
+    <div className="fixed right-4 top-20 z-50 flex w-[calc(100vw-2rem)] max-w-[360px] flex-col gap-3">
       {toasts.map((toast) => (
         <div
           key={toast.id}
@@ -3299,56 +2231,14 @@ function ToastStack({ toasts, onDismiss }) {
 }
 
 function ConfirmModal({ title, message, onCancel, onConfirm }) {
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="panel w-full max-w-md rounded-2xl p-6">
-        <div className="flex items-center gap-3 text-accent">
-          <AlertTriangle size={20} />
-          <h3 className="font-display text-2xl text-text">{title}</h3>
-        </div>
-        <p className="mt-3 text-sm text-muted">{message}</p>
-        <div className="mt-6 flex justify-end gap-3">
-          <button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-text">
-            Cancel
-          </button>
-          <button type="button" onClick={onConfirm} className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">
-            Confirm
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const { language } = useI18n();
+  return <Dialog open onOpenChange={open => { if (!open) onCancel(); }}><DialogContent><DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle size={20}/>{title}</DialogTitle><DialogDescription>{message}</DialogDescription></DialogHeader><div className="mt-4 flex justify-end gap-3"><button type="button" onClick={onCancel} className="quiet-action">{language === "ru" ? "Отмена" : "Cancel"}</button><button type="button" onClick={onConfirm} className="rounded-lg border border-red-400/50 bg-red-500/10 px-4 py-3 text-sm text-red-200">{language === "ru" ? "Подтвердить" : "Confirm"}</button></div></DialogContent></Dialog>;
 }
 
-function ImportModal({ onMerge, onReplace, onCancel }) {
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="panel w-full max-w-lg rounded-2xl p-6">
-        <div className="flex items-center gap-3 text-accent">
-          <FileUp size={20} />
-          <h3 className="font-display text-2xl text-text">Import Data</h3>
-        </div>
-        <p className="mt-3 text-sm text-muted">
-          Choose whether the imported JSON should merge into the current workspace or replace it entirely.
-        </p>
-        <div className="mt-6 grid grid-cols-2 gap-4">
-          <button type="button" onClick={onMerge} className="rounded-2xl border border-accent/40 bg-accent/10 p-4 text-left">
-            <div className="font-display text-xl text-text">Merge</div>
-            <div className="mt-1 text-sm text-muted">Keep current data and overlay imported teams/history.</div>
-          </button>
-          <button type="button" onClick={onReplace} className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-left">
-            <div className="font-display text-xl text-text">Replace</div>
-            <div className="mt-1 text-sm text-muted">Swap the entire local workspace with the imported file.</div>
-          </button>
-        </div>
-        <div className="mt-6 flex justify-end">
-          <button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2 text-sm text-muted hover:text-text">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function ImportModal({ onMerge, onReplace, onCancel, counts }) {
+  const { language } = useI18n();
+  const ru = language === "ru";
+  return <Dialog open onOpenChange={open => { if (!open) onCancel(); }}><DialogContent><DialogHeader><DialogTitle>{ru ? "Импорт данных" : "Import data"}</DialogTitle><DialogDescription>{ru ? "Объединение сохраняет текущие данные. Замена удалит команды и матчи, отсутствующие в файле; перед ней создаётся локальная резервная копия." : "Merge keeps existing data. Replace removes teams and matches not in this file; a local backup is created first."}</DialogDescription></DialogHeader><p className="text-sm text-muted">{ru ? "Команд" : "Teams"}: {counts?.teams ?? 0} · {ru ? "Матчей" : "Matches"}: {counts?.matches ?? 0}</p><div className="flex flex-wrap gap-3"><button type="button" onClick={onMerge} className="primary-action">{ru ? "Объединить" : "Merge"}</button><button type="button" onClick={onReplace} className="rounded-lg border border-red-400/50 px-4 py-3 text-sm text-red-200">{ru ? "Заменить данные" : "Replace data"}</button><button type="button" onClick={onCancel} className="quiet-action">{ru ? "Отмена" : "Cancel"}</button></div></DialogContent></Dialog>;
 }
 
 function RatingBar({ value }) {
@@ -3943,7 +2833,8 @@ function TeamSetupPreview({ team }) {
 }
 
 function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVeto, canStartMatch, matchHistory = [] }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
+  const ru = language === "ru";
   const teamA = teams.find((team) => team.id === setup.teamAId);
   const teamB = teams.find((team) => team.id === setup.teamBId);
 
@@ -3951,13 +2842,13 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
     <div className="space-y-6">
       <Panel
         title={t("match_setup")}
-        subtitle="Pick the teams, format, and speed. Veto starts from this screen."
+        subtitle={ru ? "Выбери соперников, формат и скорость. Затем начнётся veto." : "Pick the lineups, format and speed, then start the veto."}
         action={
           <button
             type="button"
             onClick={onStartVeto}
             disabled={!canStartMatch}
-            className="flex items-center gap-2 rounded-xl border border-accent bg-accent/10 px-4 py-2 text-sm text-accent disabled:opacity-40"
+            className="primary-action"
           >
             <Play size={16} />
             {t("start_veto")}
@@ -3966,9 +2857,7 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
       >
         <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-2")}>
           <div className="space-y-4">
-            <label className="block text-sm text-muted">
-              Team A
-              <select
+            <label className="block text-sm text-muted">{ru ? "Команда A" : "Team A"}<select
                 value={setup.teamAId}
                 onChange={(event) => onSetupChange((current) => ({ ...current, teamAId: event.target.value }))}
                 className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
@@ -3983,9 +2872,7 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
             <TeamSetupPreview team={teamA} />
           </div>
           <div className="space-y-4">
-            <label className="block text-sm text-muted">
-              Team B
-              <select
+            <label className="block text-sm text-muted">{ru ? "Команда B" : "Team B"}<select
                 value={setup.teamBId}
                 onChange={(event) => onSetupChange((current) => ({ ...current, teamBId: event.target.value }))}
                 className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
@@ -4001,20 +2888,16 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
           </div>
         </div>
       </Panel>
-      <Panel title="Tournament Context" subtitle="These fields are saved with the match and drive archive and stats filters.">
+      <Panel title={ru ? "Событие" : "Event context"} subtitle={ru ? "Сохраняется в архиве. Необязательные параметры для фильтров статистики." : "Saved with the match for archive and statistics filters."}>
         <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-2")}>
-          <label className="block text-sm text-muted">
-            Tournament
-            <input
+          <label className="block text-sm text-muted">{ru ? "Турнир" : "Tournament"}<input
               type="text"
               value={setup.tournamentName}
               onChange={(event) => onSetupChange((current) => ({ ...current, tournamentName: event.target.value }))}
               className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
             />
           </label>
-          <label className="block text-sm text-muted">
-            Stage
-            <select
+          <label className="block text-sm text-muted">{ru ? "Стадия" : "Stage"}<select
               value={setup.stage}
               onChange={(event) => onSetupChange((current) => ({ ...current, stage: event.target.value }))}
               className="mt-1 w-full rounded-xl border border-border bg-surface px-3 py-2 text-text"
@@ -4026,9 +2909,7 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
               ))}
             </select>
           </label>
-          <label className="block text-sm text-muted">
-            Event Type
-            <div className="mt-1 flex gap-2">
+          <label className="block text-sm text-muted">{ru ? "Тип события" : "Event Type"}<div className="mt-1 flex gap-2">
               {EVENT_TYPES.map((eventType) => (
                 <button
                   key={eventType}
@@ -4046,9 +2927,7 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
               ))}
             </div>
           </label>
-          <label className="block text-sm text-muted">
-            Match Date
-            <input
+          <label className="block text-sm text-muted">{ru ? "Дата матча" : "Match Date"}<input
               type="date"
               value={setup.matchDate}
               onChange={(event) => onSetupChange((current) => ({ ...current, matchDate: event.target.value }))}
@@ -4058,10 +2937,10 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
         </div>
       </Panel>
       <div className={classNames("grid gap-6", mobile ? "grid-cols-1" : "grid-cols-[1fr_360px]")}>
-        <Panel title={t("series_rules")} subtitle="Current sim settings match the full MR12 spec, with OT and economy enabled.">
+        <Panel title={t("series_rules")} subtitle={ru ? "MR12, экономика и овертаймы. Формат определяет число карт для победы." : "MR12, economy and overtime. The format determines the maps needed to win."}>
           <div className={classNames("grid gap-4", mobile ? "grid-cols-1" : "grid-cols-3")}>
             <div>
-              <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">Format</div>
+              <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">{ru ? "Формат" : "Format"}</div>
               <div className="flex gap-2">
                 {MATCH_FORMATS.map((format) => (
                   <button
@@ -4081,7 +2960,7 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
               </div>
             </div>
             <div>
-              <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">Simulation Speed</div>
+              <div className="mb-2 text-xs uppercase tracking-[0.2em] text-muted">{ru ? "Скорость" : "Simulation Speed"}</div>
               <div className="flex gap-2">
                 {SPEED_OPTIONS.map((option) => (
                   <button
@@ -4110,9 +2989,7 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
                     showDetailedLogs: event.target.checked,
                   }))
                 }
-              />
-              Show detailed logs
-            </label>
+              />{ru ? "Подробные события" : "Show detailed logs"}</label>
           </div>
           <div className={classNames("mt-6 grid gap-4", mobile ? "grid-cols-2" : "grid-cols-3")}>
             {MAP_POOL.map((map) => (
@@ -4128,17 +3005,17 @@ function MatchSetupView({ teams, setup, mobile = false, onSetupChange, onStartVe
             ))}
           </div>
         </Panel>
-        <Panel title={t("checklist")} subtitle="The series is ready when both teams have legal five-player rosters.">
+        <Panel title={t("checklist")} subtitle={ru ? "Для старта нужны две разные команды по пять игроков." : "Select two different five-player lineups to start."}>
           <div className="space-y-3 text-sm">
-            <ChecklistRow label="Different teams selected" passed={setup.teamAId !== setup.teamBId} />
-            <ChecklistRow label="Team A has 5 players" passed={teamA?.players.length === 5} />
-            <ChecklistRow label="Team B has 5 players" passed={teamB?.players.length === 5} />
-            <ChecklistRow label="Captains assigned" passed={Boolean(teamA?.players.some((player) => player.isCaptain) && teamB?.players.some((player) => player.isCaptain))} />
-            <ChecklistRow label="Coach profiles present" passed={Boolean(teamA?.coach.nickname && teamB?.coach.nickname)} />
+            <ChecklistRow label={ru ? "Выбраны разные команды" : "Different teams selected"} passed={setup.teamAId !== setup.teamBId} />
+            <ChecklistRow label={ru ? "В команде A пять игроков" : "Team A has 5 players"} passed={teamA?.players.length === 5} />
+            <ChecklistRow label={ru ? "В команде B пять игроков" : "Team B has 5 players"} passed={teamB?.players.length === 5} />
+            <ChecklistRow label={ru ? "Капитаны назначены (рекомендация)" : "Captains assigned"} passed={Boolean(teamA?.players.some((player) => player.isCaptain) && teamB?.players.some((player) => player.isCaptain))} />
+            <ChecklistRow label={ru ? "Тренеры заполнены (рекомендация)" : "Coach profiles present"} passed={Boolean(teamA?.coach.nickname && teamB?.coach.nickname)} />
           </div>
           {!canStartMatch && (
             <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              Fix roster or team selection issues before starting veto.
+              {ru ? "Проверь составы и выбор команд перед veto." : "Check the lineups and team selection before starting veto."}
             </div>
           )}
         </Panel>
@@ -4152,11 +3029,6 @@ function TacticalPreview({ teamA, teamB, format, matchHistory = [] }) {
   const { t } = useI18n();
   const strengthA = getTeamStrength(teamA);
   const strengthB = getTeamStrength(teamB);
-  const totalStrength = strengthA + strengthB;
-  const winChanceA = Math.round((strengthA / totalStrength) * 100);
-  const winChanceB = 100 - winChanceA;
-  const favorite = winChanceA > winChanceB ? teamA : winChanceB > winChanceA ? teamB : null;
-  const upsetChance = Math.min(winChanceA, winChanceB);
 
   // Map veto prediction — which maps each team would pick/ban
   const mapAnalysis = MAP_POOL.map((map) => {
@@ -4313,36 +3185,8 @@ function TacticalPreview({ teamA, teamB, format, matchHistory = [] }) {
         </Panel>
       )}
 
-      <Panel title="Tactical Preview" subtitle="Pre-match forecast based on team strength, map pool, and role composition.">
-        {/* Win probability bar */}
-        <div className="rounded-2xl border border-border bg-card/60 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">{teamA.logo}</span>
-              <span className="font-display text-lg text-text">{teamA.name}</span>
-              <span className="numbers text-2xl font-bold" style={{ color: winChanceA >= 55 ? "#34d399" : winChanceA <= 45 ? "#f87171" : "#fbbf24" }}>
-                {winChanceA}%
-              </span>
-            </div>
-            <div className="text-xs uppercase tracking-[0.18em] text-muted">Win Chance</div>
-            <div className="flex items-center gap-2">
-              <span className="numbers text-2xl font-bold" style={{ color: winChanceB >= 55 ? "#34d399" : winChanceB <= 45 ? "#f87171" : "#fbbf24" }}>
-                {winChanceB}%
-              </span>
-              <span className="font-display text-lg text-text">{teamB.name}</span>
-              <span className="text-xl">{teamB.logo}</span>
-            </div>
-          </div>
-          <div className="flex h-3 overflow-hidden rounded-full">
-            <div className="bg-emerald-500/70" style={{ width: `${winChanceA}%` }} />
-            <div className="bg-red-500/70" style={{ width: `${winChanceB}%` }} />
-          </div>
-          {favorite && (
-            <div className="mt-2 text-center text-sm text-muted">
-              <span className="font-display text-accent">{favorite.name}</span> favored · upset chance <span className="numbers text-amber-300">{upsetChance}%</span> · format <span className="font-mono text-text">{format}</span>
-            </div>
-          )}
-        </div>
+      <Panel title="Сравнение / Lineup comparison" subtitle="Ratings, map preferences and roles — not a guaranteed result.">
+        <p className="rounded-xl border border-border bg-card/60 p-4 text-sm leading-6 text-muted">Сравнение состава, а не вероятность победы. Исход также зависит от оружия, экономики, карты, тактики и формы. / Lineup comparison, not a calibrated win probability.</p>
 
         {/* Role & strength breakdown */}
         <div className={classNames("mt-4 grid gap-4", "grid-cols-2")}>
@@ -6054,30 +4898,9 @@ function LayoutModeSwitch({ layoutMode, onChange, compact = false, mobileSite = 
   );
 }
 
-function SiteModeSwitch({ siteMode, onChange, compact = false }) {
-  return (
-    <div className="flex items-center gap-1 rounded-xl border border-border bg-card/70 p-1">
-      {[
-        { id: "desktop", label: compact ? "PC" : "Desktop" },
-        { id: "mobile", label: "Mobile" },
-      ].map((mode) => (
-        <button
-          key={mode.id}
-          type="button"
-          onClick={() => onChange?.(mode.id)}
-          className={classNames(
-            "rounded-lg border px-3 py-1.5 transition",
-            compact ? "text-[11px]" : "text-xs uppercase tracking-[0.16em]",
-            siteMode === mode.id
-              ? "border-accent bg-accent/10 text-accent"
-              : "border-transparent text-muted hover:text-text"
-          )}
-        >
-          {mode.label}
-        </button>
-      ))}
-    </div>
-  );
+function SiteModeSwitch({ siteMode, onChange }) {
+  const { language } = useI18n();
+  return <select aria-label={language === "ru" ? "Режим интерфейса" : "Interface layout"} value={siteMode ?? "auto"} onChange={e => onChange(e.target.value === "auto" ? null : e.target.value)} className="max-w-28 rounded-lg border border-border bg-card px-2 text-xs"><option value="auto">{language === "ru" ? "Авто" : "Auto"}</option><option value="desktop">PC</option><option value="mobile">{language === "ru" ? "Телефон" : "Phone"}</option></select>;
 }
 
 function PresentationModeSwitch({ mode, onChange }) {
@@ -7235,8 +6058,8 @@ function RadarPanel({
   showSummary = true,
 }) {
   const assets = RADAR_ASSETS[mapName];
-  const upperMarkers = markers.filter((marker) => marker.level !== "lower");
-  const lowerMarkers = markers.filter((marker) => marker.level === "lower");
+  const upperMarkers = markers.filter((marker) => marker.positioned !== false && marker.level !== "lower");
+  const lowerMarkers = markers.filter((marker) => marker.positioned !== false && marker.level === "lower");
   const compactStage = compact;
   const splitLevels = Boolean(assets?.lower);
 
@@ -7381,8 +6204,9 @@ function RadarDeathMarker({ marker, victimSide, compact = false, expanded = fals
   if (!width || !height) {
     return null;
   }
-  const rawNormalizedX = (marker.x - viewBox.left) / viewBox.width;
-  const rawNormalizedY = (marker.y - viewBox.top) / viewBox.height;
+  const rawNormalizedX = ((marker.displayX ?? marker.x) - viewBox.left) / viewBox.width;
+  const rawNormalizedY = ((marker.displayY ?? marker.y) - viewBox.top) / viewBox.height;
+  if (marker.positioned === false || !Number.isFinite(rawNormalizedX) || !Number.isFinite(rawNormalizedY)) return null;
   if (rawNormalizedX < 0 || rawNormalizedX > 1 || rawNormalizedY < 0 || rawNormalizedY > 1) {
     return null;
   }
@@ -7391,13 +6215,16 @@ function RadarDeathMarker({ marker, victimSide, compact = false, expanded = fals
 
   return (
     <div
-      className="pointer-events-none absolute"
+      className="pointer-events-auto absolute"
       style={{
         left: imageFrame.left + normalizedX * width,
         top: imageFrame.top + normalizedY * height,
         transform: "translate(-50%, -50%)",
       }}
-      title={marker.label}
+      title={`${marker.label} — approximate simulated position`}
+      role="img"
+      aria-label={`${marker.zoneLabel ?? marker.zone}: ${marker.label}. Approximate simulated position.`}
+      tabIndex={0}
     >
       <div
         className={classNames(
@@ -7439,13 +6266,16 @@ function RadarHeatmapMarker({ cluster, compact = false, expanded = false, imageF
 
   return (
     <div
-      className="pointer-events-none absolute"
+      className="pointer-events-auto absolute"
       style={{
         left: imageFrame.left + normalizedX * width,
         top: imageFrame.top + normalizedY * height,
         transform: "translate(-50%, -50%)",
       }}
       title={cluster.title}
+      role="img"
+      aria-label={cluster.title}
+      tabIndex={0}
     >
       <div className={classNames("rounded-full border border-white/10 backdrop-blur-sm", tone)} style={{ width: size, height: size }} />
     </div>
@@ -9244,3 +8074,5 @@ function PlayerMiniStat({ label, value, tone }) {
   );
 }
 
+
+// match-desk integration complete

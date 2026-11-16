@@ -1,6 +1,8 @@
 // Server-side helpers to convert between the app's MatchHistoryEntry shape
 // (used by archiveStats.js) and the Prisma MatchRecord row.
 
+import { validateHistoryEntry } from "./historyValidation.js";
+
 interface MatchHistoryEntryInput {
   id: string;
   date?: string;
@@ -18,7 +20,9 @@ interface MatchHistoryEntryInput {
 
 /** Convert an entry (with full `data` payload) into a Prisma MatchRecord row. */
 export function entryToRow(entry: MatchHistoryEntryInput) {
-  const rawData = (entry.data ?? {}) as Record<string, any>;
+  const error = validateHistoryEntry(entry);
+  if (error) throw new TypeError(error);
+  const rawData = entry.data as Record<string, any>;
 
   // Strip heavy fields before serializing to avoid Vercel's 4.5MB request
   // body limit. We keep enough data for Analyst Desk (expectancy curves,

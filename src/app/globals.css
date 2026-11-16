@@ -5,13 +5,13 @@
 
 /* ---- CS2 Pro Match Simulator — original user theme (contrast-fixed) ---- */
 :root {
-  --bg: #0a0b0d;
-  --surface: #111318;
-  --card: #1a1d24;
-  --border: #2a2d36;
-  --accent: #f5a623;
+  --bg: #101820;
+  --surface: #18232e;
+  --card: #1c2a36;
+  --border: #334351;
+  --accent: #e9af57;
   --danger: #e63950;
-  --ct: #5b8dd9;
+  --ct: #74b7dc;
   --text-primary: #e8eaf0;
   /* lightened for WCAG AA contrast on dark panels (was #6b7280 → ~2.5:1) */
   --text-muted: #a8b0c0;
@@ -19,27 +19,27 @@
   --radius: 8px;
 
   /* shadcn-compatible aliases (accent stays amber, matching the original) */
-  --background: #0a0b0d;
+  --background: #101820;
   --foreground: #e8eaf0;
   --card-foreground: #e8eaf0;
-  --popover: #111318;
+  --popover: #18232e;
   --popover-foreground: #e8eaf0;
-  --primary: #f5a623;
-  --primary-foreground: #0a0b0d;
-  --secondary: #1a1d24;
+  --primary: #e9af57;
+  --primary-foreground: #101820;
+  --secondary: #1c2a36;
   --secondary-foreground: #e8eaf0;
-  --muted: #111318;
+  --muted: #18232e;
   --muted-foreground: #a8b0c0;
-  --accent-foreground: #0a0b0d;
+  --accent-foreground: #101820;
   --destructive: #e63950;
   --destructive-foreground: #ffffff;
-  --input: #2a2d36;
-  --ring: #f5a623;
+  --input: #334351;
+  --ring: #e9af57;
 }
 
 @theme inline {
-  --font-sans: var(--font-rajdhani);
-  --font-mono: var(--font-jetbrains-mono);
+  --font-sans: "Segoe UI", Arial, sans-serif;
+  --font-mono: "Cascadia Code", Consolas, monospace;
 
   /* Original app theme colors — these power text-text, text-muted, bg-surface,
      bg-card, text-accent, border-border, bg-bg, text-numbers, text-danger, text-ct
@@ -83,14 +83,11 @@ html {
 
 body {
   margin: 0;
-  min-width: 1280px;
-  background:
-    radial-gradient(circle at top left, rgba(245, 166, 35, 0.14), transparent 22%),
-    radial-gradient(circle at top right, rgba(91, 141, 217, 0.12), transparent 20%),
-    linear-gradient(180deg, #0a0b0d 0%, #0d1015 48%, #08090b 100%);
+  min-width: 320px;
+  background: var(--bg);
   background-attachment: fixed;
   color: var(--text-primary);
-  font-family: var(--font-rajdhani), "Rajdhani", sans-serif;
+  font-family: "Segoe UI", Arial, sans-serif;
   overflow-x: hidden;
 }
 
@@ -123,12 +120,12 @@ body.phone-live {
 
 .panel {
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(26, 29, 36, 0.98), rgba(18, 20, 24, 0.98));
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .numbers {
-  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  font-family: "Cascadia Code", Consolas, monospace;
   color: var(--text-numbers);
 }
 
@@ -239,4 +236,33 @@ body.phone-live {
   .border-accent\/50 { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
   .text-accent\/10 { color: color-mix(in srgb, var(--accent) 10%, transparent); }
   .from-accent\/10 { --tw-gradient-from: color-mix(in srgb, var(--accent) 10%, transparent); }
+}
+
+/* Match desk: restrained broadcast chrome, with emphasis on the matchup. */
+.font-display { font-family: "Bahnschrift", "Segoe UI", Arial, sans-serif; }
+.match-desk { position: relative; background: var(--surface); }
+.match-desk-heading { border-top: 3px solid var(--accent); }
+.primary-action { display: inline-flex; align-items: center; justify-content: center; gap: .65rem; border: 1px solid var(--accent); border-radius: .6rem; background: var(--accent); color: #101820; padding: .8rem 1.2rem; font-weight: 700; min-height: 44px; }
+.primary-action:hover { filter: brightness(1.08); }
+.primary-action:disabled { opacity: .45; cursor: not-allowed; }
+.quiet-action { display: inline-flex; align-items: center; gap: .5rem; padding: .5rem; color: var(--text-primary); font-size: .8rem; white-space: nowrap; }
+.quiet-action:hover { color: var(--accent); }
+.match-result-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem .25rem; text-align: left; }
+.match-result-row:hover { background: color-mix(in srgb, var(--ct) 6%, transparent); }
+.desk-nav { display: flex; align-items: center; gap: .25rem; overflow-x: auto; }
+.desk-nav button { display: inline-flex; align-items: center; gap: .55rem; border-radius: .5rem; padding: .65rem .8rem; color: var(--text-muted); white-space: nowrap; min-height: 44px; }
+.desk-nav button[aria-current="page"] { color: var(--text-primary); background: var(--card); box-shadow: inset 0 -2px var(--accent); }
+.sync-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .6rem 1rem; border-bottom: 1px solid var(--border); font-size: .75rem; background: var(--bg); }
+.sync-banner[data-error="true"] { background: #3a2529; }
+button, a, input, select, textarea { scroll-margin-top: 100px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input, select, textarea { min-height: 40px; }
+input[type="checkbox"], input[type="radio"], input[type="range"] { min-height: auto; }
+@media (max-width: 640px) {
+  .primary-action { width: 100%; }
+  .panel { padding: 1rem; border-radius: .8rem; }
+  .numbers { font-variant-numeric: tabular-nums; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

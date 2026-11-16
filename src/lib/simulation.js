@@ -1,3 +1,5 @@
+import { createRandomState, hasRandomState, random, withRandomState } from "./simulationRandom.js";
+
 export const STORAGE_KEY = "cs2sim_state_v1";
 
 export const MAP_POOL = [
@@ -430,14 +432,14 @@ const ZONE_TIME_WINDOWS = {
     // A main is the long default — early presence + late post-plant holds.
     // Squeaky opens slightly later (doorbang timing). Mid is fast (vents control).
     // B halls is a late execute lane. Vents/z-connector are lurk timings.
-    "A main": [14, 58],
+    "a main": [14, 58],
     squeaky: [20, 64],
     mid: [12, 44],
     vents: [24, 78],
     highway: [30, 90],
     "z-connector": [32, 95],
     checkers: [40, 110],
-    "B halls": [26, 72],
+    "b halls": [26, 72],
     quad: [42, 115],
     toxic: [44, 115],
     site: [44, 115],
@@ -767,6 +769,11 @@ const MAP_ORDER_WEIGHTS = [1, 0.92, 0.84, 0.74, 0.62, 0.5, 0.38];
 let uidCounter = 1;
 
 export function uid(prefix = "id") {
+  if (hasRandomState()) {
+    const high = Math.floor(random() * 0x100000000).toString(36);
+    const low = Math.floor(random() * 0x100000000).toString(36);
+    return `${prefix}_${high}_${low}`;
+  }
   uidCounter += 1;
   return `${prefix}_${uidCounter}`;
 }
@@ -843,11 +850,11 @@ export function formatElapsed(seconds) {
 }
 
 function rand(min = 0, max = 1) {
-  return min + Math.random() * (max - min);
+  return min + random() * (max - min);
 }
 
 function pick(items) {
-  return items[Math.floor(Math.random() * items.length)];
+  return items[Math.floor(random() * items.length)];
 }
 
 function weightedPick(items, weightFn) {
@@ -856,7 +863,7 @@ function weightedPick(items, weightFn) {
     .filter((entry) => entry.weight > 0);
 
   const total = sum(weighted.map((entry) => entry.weight));
-  let roll = Math.random() * total;
+  let roll = random() * total;
 
   for (const entry of weighted) {
     roll -= entry.weight;
@@ -2014,7 +2021,7 @@ function createMatchPlayerState(player, side) {
 
 function createTeamMapState(teamInput, side) {
   const team = normalizeTeam(teamInput);
-  return {
+  return ensureMapForm({
     side,
     team,
     lossStreak: 0,
@@ -2030,14 +2037,30 @@ function createTeamMapState(teamInput, side) {
       antiEco: 0,
     },
     players: team.players.map((player) => createMatchPlayerState(player, side)),
-  };
+  });
+}
+
+// A shared map-day factor and bounded individual deviations persist through
+// halves/rounds. Consistency controls their width, not a one-sided upset roll.
+function ensureMapForm(teamState) {
+  if (!Number.isFinite(teamState.mapForm)) {
+    const consistency = average(teamState.players.map((player) => player.consistency));
+    teamState.mapForm = 1 + rand(-1, 1) * (1 - consistency / 100) * 0.18;
+  }
+  for (const player of teamState.players) {
+    if (!Number.isFinite(player.mapForm)) {
+      player.mapForm = teamState.mapForm *
+        (1 + rand(-1, 1) * (1 - player.consistency / 100) * 0.25);
+    }
+  }
+  return teamState;
 }
 
 function determineKnifeWinner(teamA, teamB) {
   const strengthA = getTeamStrength(teamA);
   const strengthB = getTeamStrength(teamB);
   const chanceA = strengthA / Math.max(1, strengthA + strengthB);
-  return Math.random() < chanceA ? "teamA" : "teamB";
+  return random() < chanceA ? "teamA" : "teamB";
 }
 
 function chooseStartingSide(team, mapName) {
@@ -2109,10 +2132,12 @@ function mapsNeededToWin(format) {
   return 3;
 }
 
-export function createMatchFromSetup(teamAInput, teamBInput, settings) {
+export function createMatchFromSetup(teamAInput, teamBInput, settings = {}) {
+  const rng = createRandomState(settings.seed);
+  const result = withRandomState(rng, () => {
   const teamA = normalizeTeam(teamAInput);
   const teamB = normalizeTeam(teamBInput);
-  const veto = simulateVeto(teamA, teamB, settings.format);
+  const veto = simulateVeto(teamA, teamB, settings.format ?? "BO3");
   const tournament = {
     name: settings.tournamentName?.trim() || "Custom Event",
     stage: settings.stage?.trim() || "Group Stage",
@@ -2126,7 +2151,7 @@ export function createMatchFromSetup(teamAInput, teamBInput, settings) {
     status: "veto",
     teamA,
     teamB,
-    format: settings.format,
+    format: settings.format ?? "BO3",
     speed: settings.speed,
     showDetailedLogs: Boolean(settings.showDetailedLogs),
     tournament,
@@ -2138,6 +2163,9 @@ export function createMatchFromSetup(teamAInput, teamBInput, settings) {
     results: null,
     latestRound: null,
   };
+  });
+  result.rng = rng;
+  return result;
 }
 
 export function startMatch(matchInput) {
@@ -2395,7 +2423,7 @@ function purchasePlayerLoadout(player, side, roundType) {
       : clamp(
           Math.round(next.utility / 22) + (next.role === "Support" ? 1 : 0),
           0,
-          5
+          4
         );
 
   inventory.utilityItems = [];
@@ -2404,6 +2432,12 @@ function purchasePlayerLoadout(player, side, roundType) {
       break;
     }
 
+    if (utilityName === "flash" && inventory.utilityItems.filter((item) => item === "flash").length >= 2) {
+      continue;
+    }
+    if (utilityName !== "flash" && inventory.utilityItems.includes(utilityName)) {
+      continue;
+    }
     const utilityCost = UTILITY_COSTS[utilityName];
     if (bank < utilityCost) {
       continue;
@@ -2433,7 +2467,7 @@ function purchasePlayerLoadout(player, side, roundType) {
 }
 
 function prepareTeamForRound(teamStateInput, opponentState, roundNumber, isOvertime) {
-  const teamState = deepClone(teamStateInput);
+  const teamState = ensureMapForm(deepClone(teamStateInput));
   const roundType = getRoundType(teamState, opponentState, roundNumber, isOvertime);
   let totalSpent = 0;
   let totalLoadoutValue = 0;
@@ -2494,26 +2528,18 @@ function recentFormScore(teamState) {
   const recent = teamState.recentResults.slice(-3);
   const wins = recent.filter((result) => result === "W").length;
   const losses = recent.filter((result) => result === "L").length;
-  return clamp(0.5 + wins * 0.03 - losses * 0.02 + teamState.moraleBoost + teamState.upsetBoost, 0.36, 0.66);
+  return clamp(0.5 + wins * 0.03 - losses * 0.02 + teamState.moraleBoost, 0.36, 0.66);
 }
 
 function teamMapAdvantage(team, mapName) {
   return clamp(getMapPriority(team, mapName) * getMapModifier(team, mapName), 0.12, 1.25);
 }
 
-/** Quick strength estimate from a team's live state (used for upset logic). */
-function teamStrengthValue(teamState) {
-  if (!teamState?.players?.length) return 0;
-  return average(
-    teamState.players.map((player) => compositeRating(player))
-  );
-}
-
 function teamFirepower(teamState) {
   return average(
     teamState.players.map((player) => {
       const weapon = getWeapon(player.roundLoadout.weaponId);
-      return ((player.aim + player.entry) / 200) * weapon.quality;
+      return ((player.aim + player.entry) / 200) * weapon.quality * (player.mapForm ?? 1);
     })
   );
 }
@@ -2566,7 +2592,7 @@ function getTeamRoundProfile(teamState, opponentState, mapName, teamLoadoutValue
   };
 }
 
-function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, ctLoadoutValue, matchFormat) {
+function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, ctLoadoutValue) {
   const mapConfig = MAP_CONFIGS[mapName];
   const tProfile = getTeamRoundProfile(
     tTeamState,
@@ -2583,78 +2609,23 @@ function buildTWinProbability(tTeamState, ctTeamState, mapName, tLoadoutValue, c
     tLoadoutValue
   );
 
-  // Format-specific balance:
-  // - BO1: HEAVY randomness — one map, anything can happen. T2 teams beat T1
-  //   teams regularly in real BO1s (e.g. Major upsets). Win prob is pushed
-  //   towards 50/50 with big form swings so upsets are common, not rare.
-  // - BO3: balanced (the default feel). Strong team is favored but T2 can steal a map.
-  // - BO5: less randomness, prep & captain/coach matter more. Strong teams
-  //   with deeper map pools and better coaching pull ahead over 5 maps.
-  const formatSettings = {
-    // BO1: near coin-flip. clamp 0.30-0.70 means even a much weaker team has
-    // 30% per round; with formVariance 0.55 and 22% upset chance, T2 wins
-    // the map ~35-40% of the time against T1 — realistic for BO1 upsets.
-    BO1: { formVariance: 0.55, upsetChance: 0.22, upsetBoost: 0.30, clampMin: 0.30, clampMax: 0.70, tacticalWeight: 0.10, compression: 0.45 },
-    // BO3: T1 favored but T2 takes maps. More form swing than BO5, less than BO1.
-    BO3: { formVariance: 0.38, upsetChance: 0.14, upsetBoost: 0.24, clampMin: 0.24, clampMax: 0.76, tacticalWeight: 0.17, compression: 0.30 },
-    // BO5: prep & depth win out. Low randomness, tactical weight high.
-    BO5: { formVariance: 0.24, upsetChance: 0.08, upsetBoost: 0.16, clampMin: 0.26, clampMax: 0.74, tacticalWeight: 0.22, compression: 0.20 },
-  }[matchFormat] || { formVariance: 0.38, upsetChance: 0.14, upsetBoost: 0.24, clampMin: 0.24, clampMax: 0.76, tacticalWeight: 0.17, compression: 0.30 };
-
-  // Per-round form variance: ±half of formVariance around 1.0.
-  // BO1 swings wildly (a T2 team can pop off for a whole map),
-  // BO5 stays tighter (consistency + prep wins out over 5 maps).
-  const tFormRoll = 1 - formatSettings.formVariance / 2 + Math.random() * formatSettings.formVariance;
-  const ctFormRoll = 1 - formatSettings.formVariance / 2 + Math.random() * formatSettings.formVariance;
-
-  // Tactical weight grows with format length: in BO5 the coach's prep and
-  // the IGL's mid-rounding matter more (deeper map pool, more adaptation).
-  const firepowerWeight = 0.3 - (formatSettings.tacticalWeight - 0.15);
-  const tScore =
-    (tProfile.firepower * tFormRoll * firepowerWeight +
-      tProfile.mapAdvantage * 0.2 +
-      tProfile.econAdvantage * 0.25 +
-      tProfile.tacticalAdvantage * formatSettings.tacticalWeight +
-      tProfile.momentum * 0.1) *
-    mapConfig.baseT;
-  const ctScore =
-    (ctProfile.firepower * ctFormRoll * firepowerWeight +
-      ctProfile.mapAdvantage * 0.2 +
-      ctProfile.econAdvantage * 0.25 +
-      ctProfile.tacticalAdvantage * formatSettings.tacticalWeight +
-      ctProfile.momentum * 0.1) *
-    mapConfig.baseCT;
-
-  let prob = tScore / Math.max(0.01, tScore + ctScore);
-
-  // Compression: pull the raw probability towards 0.5 (coin-flip). In BO1
-  // this is strong (0.45) so a T1 team that would otherwise have 0.68 per
-  // round ends up around 0.59 — still favored but T2 has a real chance to
-  // take the map. BO5 compresses less (0.20) so the better team's edge
-  // holds over 5 maps. This is the main lever that makes upsets happen.
-  const compression = formatSettings.compression ?? 0.3;
-  prob = 0.5 + (prob - 0.5) * (1 - compression);
-
-  // Upset chance: the underdog gets a form spike. Higher in BO1 (one map,
-  // anything goes), lower in BO5 (prep + depth usually wins out).
-  const tStrength = teamStrengthValue(tTeamState);
-  const ctStrength = teamStrengthValue(ctTeamState);
-  const underdogIsT = tStrength < ctStrength;
-  if (Math.random() < formatSettings.upsetChance) {
-    if (underdogIsT) {
-      prob = Math.min(formatSettings.clampMax, prob + formatSettings.upsetBoost);
-    } else {
-      prob = Math.max(formatSettings.clampMin, prob - formatSettings.upsetBoost);
-    }
-  }
-
-  return clamp(prob, formatSettings.clampMin, formatSettings.clampMax);
+  // Forecast and duels use the same persistent map form. Series length only
+  // changes how many maps are played, not either team's skill in a round.
+  const score = (profile, sideBias) =>
+    (profile.firepower * 0.3 +
+      profile.mapAdvantage * 0.2 +
+      profile.econAdvantage * 0.25 +
+      profile.tacticalAdvantage * 0.15 +
+      profile.momentum * 0.1) * sideBias;
+  const tScore = score(tProfile, mapConfig.baseT);
+  const ctScore = score(ctProfile, mapConfig.baseCT);
+  return clamp(tScore / Math.max(0.01, tScore + ctScore), 0.08, 0.92);
 }
 
 function chooseStrategy(mapName, tTeamState) {
   const mapConfig = MAP_CONFIGS[mapName];
-  const splitSite = Math.random() < 0.5 ? "A" : "B";
-  const fakeSite = Math.random() < 0.5 ? "A" : "B";
+  const splitSite = random() < 0.5 ? "A" : "B";
+  const fakeSite = random() < 0.5 ? "A" : "B";
   const options = [
     { id: "executeA", label: "execute A", site: "A", weight: 1.05 * mapConfig.entryWeight },
     { id: "executeB", label: "execute B", site: "B", weight: 1.04 * mapConfig.utilityWeight },
@@ -2701,21 +2672,19 @@ function pickZone(mapName, site) {
 
 function pickPlannedZone(roundPlan, lane, fallbackZones = [], options = {}) {
   const lanePool = roundPlan?.[lane]?.length ? roundPlan[lane] : fallbackZones;
-  if (!lanePool.length) {
-    return fallbackZones[0] ?? "mid";
-  }
-
   const eligiblePool = lanePool.filter((zone) =>
+    (!fallbackZones.length || fallbackZones.includes(zone)) &&
     zoneAllowedAtTime(options.mapName, zone, options.phase ?? lane, options.elapsed ?? 0)
   );
-  const candidatePool = eligiblePool.length ? eligiblePool : lanePool;
+  if (!eligiblePool.length) return null;
+  const candidatePool = eligiblePool;
 
   if (
     options.preferTrade &&
     options.lastDeath?.zone &&
     candidatePool.includes(options.lastDeath.zone) &&
     (options.zoneUsage?.[options.lastDeath.zone] ?? 0) < Math.max(2, getZoneCapacity(options.lastDeath.zone)) &&
-    Math.random() < 0.38
+    random() < 0.38
   ) {
     return options.lastDeath.zone;
   }
@@ -2732,6 +2701,19 @@ function pickPlannedZone(roundPlan, lane, fallbackZones = [], options = {}) {
     weight *= usage >= capacity ? 0.06 : 1 / (1 + usage * 1.4);
     return weight;
   });
+}
+
+// If the intended lane has no legal victim positions, replan within that
+// victim's side/time pool; never fall back to the unfiltered lane.
+function combatZone(roundPlan, lane, victimPool, options) {
+  const planned = pickPlannedZone(roundPlan, lane, victimPool, options);
+  if (planned) return planned;
+  const legal = victimPool.filter((zone) =>
+    zoneAllowedAtTime(options.mapName, zone, options.phase, options.elapsed)
+  );
+  if (!legal.length) return null;
+  roundPlan[lane] = uniqueZones([...(roundPlan[lane] ?? []), ...legal]);
+  return pickPlannedZone(roundPlan, lane, legal, options);
 }
 
 function strategyCallLabel(teamName, strategy, mapName, plantSite) {
@@ -2794,7 +2776,7 @@ function maybeFlashSupport(teamState) {
     player.roundLoadout.utilityItems.includes("flash")
   );
 
-  if (!flashers.length || Math.random() > average(flashers.map((player) => player.utility)) / 140) {
+  if (!flashers.length || random() > average(flashers.map((player) => player.utility)) / 140) {
     return null;
   }
 
@@ -2827,7 +2809,7 @@ function maybeUtilityDamage({
       player.roundLoadout.utilityItems.includes("incendiary")
   );
 
-  if (!throwers.length || Math.random() > average(throwers.map((player) => player.utility)) / 120) {
+  if (!throwers.length || random() > average(throwers.map((player) => player.utility)) / 120) {
     return { firstKillTaken, lastDeath };
   }
 
@@ -2837,9 +2819,9 @@ function maybeUtilityDamage({
     : thrower.roundLoadout.utilityItems.includes("molotov")
       ? "molotov"
       : "incendiary";
-  consumeUtility(thrower, grenadeType);
   const target = pickCombatant(defendingTeam, "site", "close");
-  const utilityZone = pickPlannedZone(
+  if (!target) return { firstKillTaken, lastDeath };
+  const utilityZone = combatZone(
     roundPlan,
     "utility",
     buildVictimZonePool(mapName, site, "utility", defendingTeam.side),
@@ -2852,8 +2834,10 @@ function maybeUtilityDamage({
       zoneUsage,
     }
   );
-  const damage = Math.round(rand(18, 44) * (thrower.utility / 90));
-  target.hp = clamp(target.hp - damage, 0, 100);
+  if (!utilityZone) return { firstKillTaken, lastDeath };
+  consumeUtility(thrower, grenadeType);
+  const damage = Math.min(target.hp, Math.round(rand(18, 44) * (thrower.utility / 90)));
+  target.hp -= damage;
   thrower.stats.damage += damage;
   roundFlags[thrower.id].damage += damage;
   elapsedLog(
@@ -2900,7 +2884,7 @@ function maybeUtilityDamage({
     };
     elapsedLog(
       logs,
-      elapsed + 2,
+      elapsed,
       `${thrower.nickname} finishes ${target.nickname} with utility at ${utilityZone}`,
       "kill",
       {
@@ -2913,6 +2897,8 @@ function maybeUtilityDamage({
           victimTeamKey: defendingTeamKey,
           openingKill: roundFlags[thrower.id].openingKill,
           viaUtility: true,
+          damage,
+          phase: "utility",
           victimSide: defendingTeam.side,
           zone: utilityZone,
           site,
@@ -2926,7 +2912,7 @@ function maybeUtilityDamage({
 
 function consistencyRoll(player) {
   const spread = ((100 - player.consistency) / 100) * 0.38;
-  return 1 + (Math.random() * 2 - 1) * spread;
+  return 1 + (random() * 2 - 1) * spread;
 }
 
 function hotStreakBonus(player) {
@@ -2993,7 +2979,7 @@ function maybeRandomAssist(winnerTeamState, killerId, roundFlags) {
     (player) => player.id !== killerId
   );
 
-  if (!candidates.length || Math.random() > 0.18) {
+  if (!candidates.length || random() > 0.18) {
     return null;
   }
 
@@ -3006,13 +2992,14 @@ function maybeRandomAssist(winnerTeamState, killerId, roundFlags) {
 function maybeSupportChipDamage(teamState, excludedPlayerId, target, roundFlags) {
   const helpers = getAlivePlayers(teamState).filter((player) => player.id !== excludedPlayerId);
 
-  if (!helpers.length || Math.random() > 0.6) {
+  if (!helpers.length || random() > 0.6) {
     return null;
   }
 
   const helper = weightedPick(helpers, (player) => player.utility + player.gameSense + player.aim);
-  const chipDamage = Math.round(rand(8, 22) * (helper.aim / 100));
-  target.hp = clamp(target.hp - chipDamage, 1, 100);
+  const chipDamage = Math.min(Math.max(0, target.hp - 1), Math.round(rand(8, 22) * (helper.aim / 100)));
+  if (!chipDamage) return null;
+  target.hp -= chipDamage;
   helper.stats.damage += chipDamage;
   roundFlags[helper.id].damage += chipDamage;
   roundFlags[helper.id].gotAssist = true;
@@ -3062,8 +3049,8 @@ function resolveDuelEvent({
     attacker.aim / Math.max(1, attacker.aim + defender.aim) +
     (attacker.gameSense - defender.gameSense) / 240;
   chance *= duelWeaponModifier(attacker, defender, range);
-  chance *= consistencyRoll(attacker);
-  chance /= Math.max(0.7, consistencyRoll(defender));
+  chance *= consistencyRoll(attacker) * (attacker.mapForm ?? 1);
+  chance /= Math.max(0.5, consistencyRoll(defender) * (defender.mapForm ?? 1));
   chance += hotStreakBonus(attacker) - hotStreakBonus(defender);
   chance += attackerTeam.players.some((player) => player.role === "IGL" && player.alive) ? 0.02 : 0;
   chance -= defenderTeam.players.some((player) => player.role === "IGL" && player.alive) ? 0.02 : 0;
@@ -3078,23 +3065,36 @@ function resolveDuelEvent({
   chance -= defenderAlive === 1 && attackerAlive > 1 ? defender.clutch / 900 : 0;
   chance = clamp(chance, 0.08, 0.92);
 
-  const attackerWins = Math.random() < chance;
+  const attackerWins = random() < chance;
   const winner = attackerWins ? attacker : defender;
   const loser = attackerWins ? defender : attacker;
   const winnerTeam = attackerWins ? attackerTeam : defenderTeam;
   const loserTeam = attackerWins ? defenderTeam : attackerTeam;
   const winnerTeamKey = attackerWins ? attackerTeamKey : defenderTeamKey;
   const loserTeamKey = attackerWins ? defenderTeamKey : attackerTeamKey;
-  const headshot = Math.random() < clamp(winner.aim / 150, 0.12, 0.65);
-  const damage = Math.round(
-    getWeapon(winner.roundLoadout.weaponId).type === "awp"
-      ? rand(100, 115)
-      : headshot
-        ? rand(100, 132)
-        : rand(82, 110)
-  );
-  const returnDamage =
-    Math.random() < 0.72 ? Math.round(rand(14, 58) * (loser.aim / 100)) : 0;
+  const lane = phase === "early" ? "early"
+    : phase === "retake" ? (loserTeam.side === "CT" ? "retake" : "postPlant")
+    : phase === "mid" ? "mid" : "hit";
+  const victimZonePool = buildVictimZonePool(mapName, site, phase, loserTeam.side);
+  const zone = combatZone(roundPlan, lane, victimZonePool, {
+    lastDeath,
+    preferTrade: phase === "retake",
+    index: duelIndex,
+    elapsed,
+    phase,
+    mapName,
+    site,
+    zoneUsage,
+  });
+  if (!zone) {
+    return { elapsed: elapsed + 5, firstKillTaken, lastDeath, tacticalPenalty };
+  }
+  const headshot = random() < clamp(winner.aim / 150, 0.12, 0.65);
+  // A lethal burst removes the victim's remaining HP, not nominal weapon
+  // overkill. Return fire and support chips cannot damage below one HP.
+  const damage = loser.hp;
+  const returnDamage = Math.min(Math.max(0, winner.hp - 1),
+    random() < 0.72 ? Math.round(rand(14, 58) * (loser.aim / 100)) : 0);
 
   loser.alive = false;
   loser.hp = 0;
@@ -3126,7 +3126,8 @@ function resolveDuelEvent({
     winner.stats.entriesWon += 1;
   }
 
-  if (flashSupport && flashSupport.id !== winner.id) {
+  if (attackerWins && flashSupport && flashSupport.id !== winner.id &&
+      winnerTeam.players.some((player) => player.id === flashSupport.id)) {
     flashSupport.stats.assists += 1;
     flashSupport.stats.flashAssists += 1;
     roundFlags[flashSupport.id].gotAssist = true;
@@ -3136,27 +3137,6 @@ function resolveDuelEvent({
 
   const traded = updateTrade(lastDeath, winnerTeamKey, loser, roundFlags);
   const supportChip = maybeSupportChipDamage(loserTeam, loser.id, winner, roundFlags);
-  const lane =
-    phase === "early"
-      ? "early"
-      : phase === "retake"
-        ? winnerTeam.side === "CT"
-          ? "retake"
-          : "postPlant"
-        : phase === "mid"
-        ? "mid"
-          : "hit";
-  const victimZonePool = buildVictimZonePool(mapName, site, phase, loserTeam.side);
-  const zone = pickPlannedZone(roundPlan, lane, victimZonePool, {
-    lastDeath,
-    preferTrade: traded || phase === "retake",
-    index: duelIndex,
-    elapsed,
-    phase,
-    mapName,
-    site,
-    zoneUsage,
-  });
   recordZoneUse(zoneUsage, zone);
   const prefix = traded ? `${winner.nickname} trades out ${loser.nickname}` : `${winner.nickname} picks off ${loser.nickname}`;
   elapsedLog(
@@ -3180,6 +3160,10 @@ function resolveDuelEvent({
         traded,
         zone,
         site,
+        damage,
+        returnDamage,
+        flashAssistId: attackerWins && flashSupport?.id !== winner.id ? flashSupport?.id ?? null : null,
+        phase,
         weaponLabel: getWeapon(winner.roundLoadout.weaponId).label,
       },
     }
@@ -3254,7 +3238,7 @@ function maybeLurkKill({
     0.72
   );
 
-  if (Math.random() > triggerChance) {
+  if (random() > triggerChance) {
     return { elapsed, firstKillTaken, lastDeath };
   }
 
@@ -3263,14 +3247,24 @@ function maybeLurkKill({
     return { elapsed, firstKillTaken, lastDeath };
   }
 
+  const zone = combatZone(roundPlan, "lurk", buildVictimZonePool(mapName, "Mid", "lurk", teamStates[enemyKey].side), {
+    lastDeath,
+    elapsed,
+    phase: "lurk",
+    mapName,
+    site: "Mid",
+    zoneUsage,
+  });
+  if (!zone) return { elapsed: elapsed + 4, firstKillTaken, lastDeath };
+  const damage = target.hp;
   target.alive = false;
   target.hp = 0;
   lurker.stats.kills += 1;
-  lurker.stats.damage += 100;
+  lurker.stats.damage += damage;
   lurker.roundRewards += getWeapon(lurker.roundLoadout.weaponId).killReward;
   target.stats.deaths += 1;
   roundFlags[lurker.id].kills += 1;
-  roundFlags[lurker.id].damage += 100;
+  roundFlags[lurker.id].damage += damage;
   roundFlags[lurker.id].gotKill = true;
   roundFlags[target.id].died = true;
 
@@ -3279,14 +3273,6 @@ function maybeLurkKill({
     roundFlags[lurker.id].openingKill = true;
   }
 
-  const zone = pickPlannedZone(roundPlan, "lurk", buildVictimZonePool(mapName, "Mid", "lurk", teamStates[enemyKey].side), {
-    lastDeath,
-    elapsed,
-    phase: "lurk",
-    mapName,
-    site: "Mid",
-    zoneUsage,
-  });
   recordZoneUse(zoneUsage, zone);
 
   elapsedLog(
@@ -3307,6 +3293,8 @@ function maybeLurkKill({
         victimSide: teamStates[enemyKey].side,
         openingKill: roundFlags[lurker.id].openingKill,
         lurkKill: true,
+        damage,
+        phase: "lurk",
         zone,
         site: "Mid",
         weaponLabel: getWeapon(lurker.roundLoadout.weaponId).label,
@@ -3464,6 +3452,18 @@ function settleTeamAfterRound(teamStateInput, options) {
 }
 
 export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy, roundContext) {
+  if (hasRandomState()) {
+    return simulateRoundInternal(teamAStateInput, teamBStateInput, mapName, economy, roundContext);
+  }
+  const rng = deepClone(roundContext.rng ?? createRandomState(roundContext.seed));
+  const result = withRandomState(rng, () =>
+    simulateRoundInternal(teamAStateInput, teamBStateInput, mapName, economy, roundContext)
+  );
+  result.rng = rng;
+  return result;
+}
+
+function simulateRoundInternal(teamAStateInput, teamBStateInput, mapName, economy, roundContext) {
   const preparedTeamA = prepareTeamForRound(
     teamAStateInput,
     teamBStateInput,
@@ -3498,8 +3498,7 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
     teamStates[ctKey],
     mapName,
     tKey === "teamA" ? preparedTeamA.totalLoadoutValue : preparedTeamB.totalLoadoutValue,
-    ctKey === "teamA" ? preparedTeamA.totalLoadoutValue : preparedTeamB.totalLoadoutValue,
-    roundContext?.matchFormat
+    ctKey === "teamA" ? preparedTeamA.totalLoadoutValue : preparedTeamB.totalLoadoutValue
   );
   const preRoundExpectancy =
     tKey === "teamA"
@@ -3510,11 +3509,13 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
   let firstKillTaken = false;
   let lastDeath = null;
   let bombPlanted = false;
+  let plantedAt = null;
+  let detonationAt = null;
   let plantSite =
     strategy.id === "fake"
       ? oppositeSite(strategy.site)
       : strategy.site === "Mid"
-        ? (Math.random() < 0.5 ? "A" : "B")
+        ? (random() < 0.5 ? "A" : "B")
         : strategy.site;
   const openingSite = strategy.site === "Mid" ? "Mid" : strategy.site;
   const roundPlan = buildRoundZonePlan(mapName, strategy, plantSite);
@@ -3599,7 +3600,7 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
 
   const earlyRange = MAP_CONFIGS[mapName].awpWeight > 1.05 || strategy.id === "midControl" ? "long" : "mid";
   const earlyAttackerKey =
-    Math.random() < clamp(tWinProbability + (teamStates[ctKey].side === "CT" ? -0.02 : 0.02), 0.2, 0.8)
+    random() < clamp(tWinProbability + (teamStates[ctKey].side === "CT" ? -0.02 : 0.02), 0.2, 0.8)
       ? tKey
       : ctKey;
   const earlyDefenderKey = earlyAttackerKey === tKey ? ctKey : tKey;
@@ -3607,16 +3608,11 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
   const earlyDefender = pickCombatant(teamStates[earlyDefenderKey], "early", earlyRange);
 
   if (earlyAttacker && earlyDefender) {
-    const flashSupport = maybeFlashSupport(teamStates[earlyAttackerKey]);
+    const flashZone = combatZone(roundPlan, "early", buildVictimZonePool(mapName, openingSite, "early", teamStates[earlyDefenderKey].side), {
+      lastDeath, elapsed: elapsed + 4, phase: "early", mapName, site: openingSite, zoneUsage,
+    });
+    const flashSupport = flashZone ? maybeFlashSupport(teamStates[earlyAttackerKey]) : null;
     if (flashSupport) {
-      const flashZone = pickPlannedZone(roundPlan, "early", MAP_ZONES[mapName][openingSite] ?? MAP_ZONES[mapName].Mid, {
-        lastDeath,
-        elapsed: elapsed + 4,
-        phase: "early",
-        mapName,
-        site: openingSite,
-        zoneUsage,
-      });
       elapsedLog(
         logs,
         elapsed + 4,
@@ -3662,7 +3658,7 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
     lastDeath = duelResult.lastDeath;
   }
 
-  const lurkSourceKey = Math.random() < 0.55 ? tKey : ctKey;
+  const lurkSourceKey = random() < 0.55 ? tKey : ctKey;
   const lurkEnemyKey = lurkSourceKey === tKey ? ctKey : tKey;
   const lurkResult = maybeLurkKill({
     teamKey: lurkSourceKey,
@@ -3724,12 +3720,14 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
     0.88
   );
 
-  if (aliveT > 0 && aliveCT > 0 && Math.random() < plantChance) {
+  if (aliveT > 0 && aliveCT > 0 && random() < plantChance) {
     bombPlanted = true;
     const planter = weightedPick(getAlivePlayers(teamStates[tKey]), (player) =>
       player.role === "Support" || player.role === "IGL" ? 1.5 : 1
     );
     elapsed += Math.round(rand(7, 12));
+    plantedAt = elapsed;
+    detonationAt = plantedAt + 40;
     elapsedLog(
       logs,
       elapsed,
@@ -3741,6 +3739,8 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
         meta: {
           actorId: planter.id,
           bombPlanted: true,
+          plantedAt,
+          detonationAt,
           plantSite,
         },
       }
@@ -3753,7 +3753,7 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
   for (let duelIndex = 0; duelIndex < duelLoop; duelIndex += 1) {
     const aliveTs = getAlivePlayers(teamStates[tKey]).length;
     const aliveCTs = getAlivePlayers(teamStates[ctKey]).length;
-    if (!aliveTs || !aliveCTs) {
+    if (!aliveTs || !aliveCTs || elapsed + 3 >= (detonationAt ?? 115)) {
       break;
     }
 
@@ -3763,7 +3763,7 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
     const attackBias = bombPlanted
       ? clamp((1 - tWinProbability) + (aliveCTs - aliveTs) * 0.05, 0.25, 0.7)
       : clamp(tWinProbability + (aliveTs - aliveCTs) * 0.04, 0.3, 0.7);
-    const attackerKey = Math.random() < attackBias ? (bombPlanted ? ctKey : tKey) : bombPlanted ? tKey : ctKey;
+    const attackerKey = random() < attackBias ? (bombPlanted ? ctKey : tKey) : bombPlanted ? tKey : ctKey;
     const defenderKey = attackerKey === tKey ? ctKey : tKey;
     const phase = bombPlanted ? "retake" : "site";
     const range = phase === "retake" ? "close" : duelIndex === 0 ? "mid" : "close";
@@ -3774,14 +3774,14 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
       break;
     }
 
-    const flashSupport = maybeFlashSupport(teamStates[attackerKey]);
+    const flashZone = combatZone(
+      roundPlan,
+      bombPlanted ? "retake" : "hit",
+      buildVictimZonePool(mapName, plantSite, phase, teamStates[defenderKey].side),
+      { lastDeath, index: duelIndex, elapsed: elapsed + 1, phase, mapName, site: plantSite, zoneUsage }
+    );
+    const flashSupport = flashZone ? maybeFlashSupport(teamStates[attackerKey]) : null;
     if (flashSupport) {
-      const flashZone = pickPlannedZone(
-        roundPlan,
-        bombPlanted ? "retake" : "hit",
-        MAP_ZONES[mapName][plantSite] ?? MAP_ZONES[mapName].Mid,
-        { lastDeath, index: duelIndex, elapsed: elapsed + 1, phase: bombPlanted ? "retake" : "site", mapName, site: plantSite, zoneUsage }
-      );
       elapsedLog(
         logs,
         elapsed + 1,
@@ -3834,59 +3834,24 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
   let winnerKey;
   let reason;
 
-  if (!aliveTPlayers.length && aliveCTPlayers.length) {
-    if (bombPlanted) {
-      const defuser = [...aliveCTPlayers].sort((left, right) => right.gameSense - left.gameSense)[0];
-      const defuseChance = clamp(
-        0.44 +
-          defuser.gameSense / 220 +
-          (defuser.roundLoadout.defuseKit ? 0.16 : 0) -
-          Math.max(0, elapsed - 75) / 100,
-        0.18,
-        0.92
-      );
-      if (Math.random() < defuseChance) {
-        winnerKey = ctKey;
-        reason = "defuse";
-        elapsedLog(logs, elapsed + 6, `${defuser.nickname} sticks the defuse... success! Round CT`, "bomb", {
-          timeline,
-          snapshot: buildPlaybackSnapshot(teamStates),
-          meta: {
-            actorId: defuser.id,
-            defuse: true,
-          },
-        });
-      } else {
-        winnerKey = tKey;
-        reason = "bomb exploded";
-        elapsedLog(logs, elapsed + 8, `Bomb explodes on ${plantSite} and ${teamStates[tKey].team.tag} lock it in`, "bomb", {
-          timeline,
-          snapshot: buildPlaybackSnapshot(teamStates),
-          meta: {
-            bombExploded: true,
-            plantSite,
-          },
-        });
-      }
-    } else {
-      winnerKey = ctKey;
-      reason = "elimination";
-    }
-  } else if (!aliveCTPlayers.length && aliveTPlayers.length) {
+  let endedAt;
+  if (!aliveCTPlayers.length && aliveTPlayers.length) {
+    // Eliminating every CT ends the round immediately, even after a plant.
     winnerKey = tKey;
-    reason = bombPlanted ? "bomb exploded" : "elimination";
-    if (bombPlanted) {
-      elapsedLog(logs, elapsed + 4, `Bomb explodes on ${plantSite} with no CTs left in the server`, "bomb", {
-        timeline,
-        snapshot: buildPlaybackSnapshot(teamStates),
-        meta: {
-          bombExploded: true,
-          plantSite,
-        },
-      });
-    }
+    reason = "elimination";
+    endedAt = Math.max(...timeline.map((event) => event.elapsed));
   } else if (bombPlanted) {
-    const defuser = [...aliveCTPlayers].sort((left, right) => right.gameSense - left.gameSense)[0];
+    const resolutionAt = Math.min(
+      aliveTPlayers.length ? elapsed : Math.max(...timeline.map((event) => event.elapsed)),
+      detonationAt
+    );
+    // Prefer a kit when it saves time. With no opponents left there is no
+    // random failed defuse: only the actual remaining bomb time matters.
+    const defuser = [...aliveCTPlayers].sort((left, right) =>
+      Number(right.roundLoadout.defuseKit) - Number(left.roundLoadout.defuseKit) ||
+      right.gameSense - left.gameSense
+    )[0];
+    const defuseDuration = defuser?.roundLoadout.defuseKit ? 5 : 10;
     const retakeChance = clamp(
       (1 - tWinProbability) +
         (aliveCTPlayers.length - aliveTPlayers.length) * 0.06 +
@@ -3894,48 +3859,44 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
       0.18,
       0.82
     );
-    if (Math.random() < retakeChance && defuser) {
+    const canFinish = defuser && resolutionAt + defuseDuration < detonationAt;
+    if (canFinish && (!aliveTPlayers.length || random() < retakeChance)) {
       winnerKey = ctKey;
       reason = "defuse";
-      elapsedLog(logs, elapsed + 6, `${defuser.nickname} clears the last angle and completes the defuse`, "bomb", {
+      endedAt = resolutionAt + defuseDuration;
+      elapsedLog(logs, resolutionAt, `${defuser.nickname} starts ${defuseDuration}s defuse`, "bomb", {
         timeline,
         snapshot: buildPlaybackSnapshot(teamStates),
-        meta: {
-          actorId: defuser.id,
-          defuse: true,
-        },
+        meta: { actorId: defuser.id, defuseStarted: true, defuseDuration, plantedAt, detonationAt },
+      });
+      elapsedLog(logs, endedAt, `${defuser.nickname} completes the defuse`, "bomb", {
+        timeline,
+        snapshot: buildPlaybackSnapshot(teamStates),
+        meta: { actorId: defuser.id, defuse: true, defuseDuration, plantedAt, detonationAt },
       });
     } else {
       winnerKey = tKey;
       reason = "bomb exploded";
-      elapsedLog(logs, elapsed + 8, `The bomb timer runs out and ${teamStates[tKey].team.tag} convert the post-plant`, "bomb", {
+      endedAt = detonationAt;
+      elapsedLog(logs, endedAt, `Bomb explodes on ${plantSite} and ${teamStates[tKey].team.tag} lock it in`, "bomb", {
         timeline,
         snapshot: buildPlaybackSnapshot(teamStates),
-        meta: {
-          bombExploded: true,
-          plantSite,
-        },
+        meta: { bombExploded: true, plantSite, plantedAt, detonationAt },
       });
     }
+  } else if (!aliveTPlayers.length && aliveCTPlayers.length) {
+    winnerKey = ctKey;
+    reason = "elimination";
+    endedAt = Math.max(...timeline.map((event) => event.elapsed));
   } else {
-    winnerKey =
-      Math.random() < clamp(
-        (1 - tWinProbability) +
-          (aliveCTPlayers.length - aliveTPlayers.length) * 0.08 +
-          MAP_CONFIGS[mapName].baseCT -
-          0.5,
-        0.2,
-        0.8
-      )
-        ? ctKey
-        : tKey;
-    reason = winnerKey === ctKey ? "time" : "elimination";
-    if (winnerKey === ctKey) {
-      elapsedLog(logs, elapsed + 7, `Time expires and ${teamStates[ctKey].team.tag} hold the line`, "time", {
-        timeline,
-        snapshot: buildPlaybackSnapshot(teamStates),
-      });
-    }
+    // With CTs still alive, Ts can only win by planting or eliminating them.
+    winnerKey = ctKey;
+    reason = "time";
+    endedAt = 115;
+    elapsedLog(logs, endedAt, `Time expires and ${teamStates[ctKey].team.tag} hold the line`, "time", {
+      timeline,
+      snapshot: buildPlaybackSnapshot(teamStates),
+    });
   }
 
   const loserKey = winnerKey === "teamA" ? "teamB" : "teamA";
@@ -3977,7 +3938,7 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
     pistolLossBoost,
   });
 
-  settledWinner.upsetBoost = upset ? 0.07 : 0;
+  settledWinner.upsetBoost = 0;
 
   const nextTeamA = winnerKey === "teamA" ? settledWinner : settledLoser;
   const nextTeamB = winnerKey === "teamB" ? settledWinner : settledLoser;
@@ -4019,6 +3980,9 @@ export function simulateRound(teamAStateInput, teamBStateInput, mapName, economy
       loserKey,
       reason,
       bombPlanted,
+      plantedAt,
+      detonationAt,
+      endedAt,
       plantSite,
       scoreBefore: economy.score,
       scoreAfter,
@@ -4138,7 +4102,7 @@ function maybeCallTimeout(teamState, remaining, roundNumber, isOvertime) {
     return false;
   }
 
-  return Math.random() < clamp(0.34 + teamState.team.coach.tacticalRating / 180, 0.35, 0.88);
+  return random() < clamp(0.34 + teamState.team.coach.tacticalRating / 180, 0.35, 0.88);
 }
 
 function markMapWinner(map, match, winnerKey) {
@@ -4149,6 +4113,16 @@ function markMapWinner(map, match, winnerKey) {
 }
 
 export function stepMatch(matchInput) {
+  if (matchInput.status !== "live") return deepClone(matchInput);
+  // Old saved live matches acquire a deterministic stream once, without changing
+  // completed archives. Each returned state owns its stream (input is immutable).
+  const rng = deepClone(matchInput.rng ?? createRandomState(matchInput.seed ?? matchInput.id));
+  const match = withRandomState(rng, () => stepMatchInternal(matchInput));
+  match.rng = rng;
+  return match;
+}
+
+function stepMatchInternal(matchInput) {
   const match = deepClone(matchInput);
 
   if (match.status !== "live") {
@@ -4266,15 +4240,22 @@ export function stepMatch(matchInput) {
   return match;
 }
 
-export function simulateEntireMatch(matchInput) {
+export function simulateEntireMatch(matchInput, options = {}) {
   let next = deepClone(matchInput);
   let safety = 0;
+  const maxSteps = options.maxSteps ?? 500;
 
-  while (next.status === "live" && safety < 500) {
+  while (next.status === "live" && safety < maxSteps) {
     next = stepMatch(next);
     safety += 1;
   }
 
+  if (next.status === "live") {
+    const error = new Error(`Match did not finish within ${maxSteps} rounds`);
+    error.code = "SIMULATION_STEP_LIMIT";
+    error.partialMatch = next;
+    throw error;
+  }
   return next;
 }
 
